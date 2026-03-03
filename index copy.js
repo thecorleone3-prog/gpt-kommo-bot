@@ -42,6 +42,8 @@ const {
   OPENAI_API_KEY,
   DOTA_DOMAIN,
   DOTA_USER,
+  WEBAPP_URL,
+  ID_DEL_CAMPO_ORIGEN,
   DOTA_PASS,
   PORT = 3000
 } = process.env;
@@ -68,6 +70,7 @@ const colasDeEspera = new Map();
 const bufferMensajes = new Map();
 const registrosPendientes = new Map();
 const archivosProcesados = new Set();
+const leadsPublicidadRegistrados = new Set();
 const MAX_HISTORIAL = 10;
 
 function gestionarMemoria(leadId, nuevoMensaje) {
@@ -414,13 +417,38 @@ Comportamiento:
       return;
     }
 
+    const esPublicidad = lead.custom_fields_values?.some(f =>
+  f.field_id == ID_DEL_CAMPO_ORIGEN &&
+  f.values?.[0]?.value === "Publicidad"
+);
+
     const usuarioExistente = await buscarUsuarioPorTelefono(telefono);
 
 /* ======================================================
    AUTO-REGISTRO SI ENVÍA NOMBRE DIRECTAMENTE
 ====================================================== */
 
-if (!usuarioExistente) {
+if (
+  !usuarioExistente &&
+  esPublicidad &&
+  !leadsPublicidadRegistrados.has(leadId)
+) {
+
+  leadsPublicidadRegistrados.add(leadId);
+
+  await axios.post(WEBAPP_URL, {
+    evento: "lead_publicidad_nuevo",
+    leadId,
+    leadName: lead.name,
+    contactName: contacto.name,
+    telefono,
+    pipelineId: lead.pipeline_id,
+    statusId: lead.status_id,
+    fechaLead: new Date(lead.created_at * 1000).toISOString(),
+    usuarioCreado: false
+  });
+
+}
 
   const analisisNombreDirecto = await detectarNombreIA(mensajeUnificado);
 
@@ -862,6 +890,10 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
       `/api/v4/leads/${leadId}`,
       { params: { with: "contacts" } }
     );
+    const esPublicidad = leadFull.custom_fields_values?.some(f =>
+  f.field_id == ID_DEL_CAMPO_ORIGEN &&
+  f.values?.[0]?.value === "Publicidad"
+);
 
     const contactoId = leadFull._embedded?.contacts?.[0]?.id;
 
@@ -981,6 +1013,14 @@ case "exito":
 
       const telefono = normalizarTelefono(telefonoRaw);
 
+      const usuarioDB = await buscarUsuarioPorTelefono(telefono);
+
+
+      
+const esPrimeraCarga =
+  usuarioDB &&
+  (!usuarioDB.ultima_carga || Number(usuarioDB.ultima_carga) === 0);
+
 if (telefono && monto) {
 
   const montoNumero = Number(
@@ -990,6 +1030,25 @@ if (telefono && monto) {
   );
 
   if (!isNaN(montoNumero)) {
+
+    const esPrimeraCarga =
+      usuarioDB &&
+      (!usuarioDB.ultima_carga || Number(usuarioDB.ultima_carga) === 0);
+
+    // 🔥 SOLO SI ES PRIMERA CARGA Y ES PUBLICIDAD
+    if (esPrimeraCarga && esPublicidad) {
+
+      await axios.post(WEBAPP_URL, {
+        evento: "primera_carga_publicidad",
+        leadId: lead_id,
+        telefono,
+        monto: montoNumero,
+        fechaCarga: new Date().toISOString()
+      });
+
+      console.log("📊 Primera carga publicidad enviada a Sheets");
+    }
+
     await actualizarUltimaCarga(telefono, montoNumero);
     console.log("💾 Última carga actualizada:", telefono, montoNumero);
   }
