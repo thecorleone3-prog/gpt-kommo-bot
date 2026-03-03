@@ -47,8 +47,23 @@ async function guardarUsuario(data) {
   }
 }
 
+async function actualizarUltimaCarga(telefono, monto) {
+  const { error } = await supabase
+    .from("usuarios")
+    .update({
+      ultima_carga: monto,
+      ultima_carga_fecha: new Date().toISOString()
+    })
+    .eq("telefono", telefono);
+
+  if (error) {
+    console.error("Error actualizando última carga:", error);
+  }
+}
+
 export {
   initDB,
   buscarUsuarioPorTelefono,
-  guardarUsuario
+  guardarUsuario,
+  actualizarUltimaCarga
 };

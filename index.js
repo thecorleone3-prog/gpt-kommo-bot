@@ -10,7 +10,8 @@ import { crearUsuarioEnDota } from "./services/dotaService.js";
 import {
   initDB,
   buscarUsuarioPorTelefono,
-  guardarUsuario
+  guardarUsuario,
+  actualizarUltimaCarga
 } from "./services/dbService.js";
 
 dotenv.config();
@@ -270,7 +271,7 @@ Tu tarea es clasificar el mensaje en UNA de estas acciones:
 - comunidad → pide grupo, comunidad, trivia, juegos ganadores 
 - cbu → pide datos de pago, cuenta, cbu, transferencia, donde cargo, cargar o fichas
 - transfirio → ya trasnfirio, ya pago, ya envio su pago, ya cargó, ya mandó
-- recomendar → quiere invitar, referir o recomendar
+- recomendar → quiere invitar, referir, recomendar, como recomiendo?
 - recomende → ya refirio, invito, recomendo, te mandé uno
 - gratis → quiere gratis, fichas de regalo, dan fichas para probar, como gano fichas gratis
 - retirar → quiere retirar, cobrar premio, retirar saldo, bajar fichas, gene un premio, como retiro
@@ -916,7 +917,7 @@ if (!usuarioDB) {
 
 app.post("/webhook-ocr", async (req, res) => {
 
-  const { lead_id, resultado } = req.body;
+  const { lead_id, resultado, monto } = req.body;
 
   if (!lead_id || !resultado) {
     return res.sendStatus(400);
@@ -930,9 +931,43 @@ app.post("/webhook-ocr", async (req, res) => {
 
     switch (resultado) {
 
-      case "exito":
-        mensaje = "Comprobante verificado correctamente. Tu carga fue acreditada.";
-        break;
+case "exito":
+
+  mensaje = "Comprobante verificado correctamente. Tu carga fue acreditada.";
+
+  try {
+
+    // 🔎 Obtener teléfono desde el lead
+    const { data: leadFull } = await kommoApi.get(
+      `/api/v4/leads/${lead_id}`,
+      { params: { with: "contacts" } }
+    );
+
+    const contactoId = leadFull._embedded?.contacts?.[0]?.id;
+
+    if (contactoId) {
+
+      const { data: contacto } = await kommoApi.get(
+        `/api/v4/contacts/${contactoId}`
+      );
+
+      const telefonoRaw = contacto.custom_fields_values?.find(
+        f => f.field_code === "PHONE"
+      )?.values?.[0]?.value;
+
+      const telefono = normalizarTelefono(telefonoRaw);
+
+      if (telefono && monto) {
+        await actualizarUltimaCarga(telefono, monto);
+        console.log("💾 Última carga actualizada:", telefono, monto);
+      }
+    }
+
+  } catch (err) {
+    console.log("❌ Error guardando última carga:", err.message);
+  }
+
+  break;
 
       case "duplicado":
         mensaje = "Este comprobante ya fue enviado anteriormente. Si crees que es un error avisanos.";
