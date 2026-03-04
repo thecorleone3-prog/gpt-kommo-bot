@@ -20,56 +20,54 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-/* ================= ENV ================= */
-const {
-  KOMMO_LONG_TOKEN,
-  SUBDOMAIN_KOMMO,
-  KOMMO_FIELD_ID_MENSAJEENVIAR,
-  KOMMO_FIELD_ID_CLAVE,
-  KOMMO_SALESBOT_RESPUESTA,
-  KOMMO_SALESBOT_ID_COMUNIDAD,
-  KOMMO_SALESBOT_ID_CBU,
-  KOMMO_SALESBOT_ID_RECOMENDAR,
-  KOMMO_SALESBOT_ID_RECOMENDE,
-  KOMMO_SALESBOT_ID_SOPORTE,
-  KOMMO_SALESBOT_ID_RETIRAR,
-  KOMMO_SALESBOT_ID_GRATIS,
-  KOMMO_SALESBOT_ID_SORTEO,
-  KOMMO_SALESBOT_ID_LINK,
-  KOMMO_SALESBOT_ID_WAGER,
-  KOMMO_SALESBOT_ID_TRANSFIRIO,
-  KOMMO_SALESBOT_ID_PRIMERCBU,
-  OPENAI_API_KEY,
-  DOTA_DOMAIN,
-  DOTA_USER,
-  DOTA_PASS,
-  PORT = 3000
-} = process.env;
-
-const DISCORD_WEBHOOK =
-  "https://discord.com/api/webhooks/1476056529294594049/I62br6750jtfpNWtYLi0ZWvqV1BgU_iuPiqSdXLBvDSR09bmna5tydeDJbTzzn_l-R7H";
-
 const DOWNLOAD_DIR = path.join(process.cwd(), "comprobantes");
 if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 /* ================= INIT DB ================= */
 await initDB();
-/* ================= CONFIG ================= */
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-const kommoApi = axios.create({
-  baseURL: `https://${SUBDOMAIN_KOMMO}.kommo.com`,
-  headers: { Authorization: `Bearer ${KOMMO_LONG_TOKEN}` }
-});
-axiosRetry(kommoApi, { retries: 3 });
+
 /* ================= MEMORIA ================= */
 const memoriaChat = new Map();
 const colasDeEspera = new Map();
 const bufferMensajes = new Map();
 const registrosPendientes = new Map();
-const archivosProcesados = new Set();
+const archivosProcesados = new Map();
+const TIEMPO_EXPIRACION = 1000 * 60 * 60; // 1 hora
 const MAX_HISTORIAL = 10;
 
+const ultimaActividad = new Map();
+const TIEMPO_EXPIRACION_MAPS = 1000 * 60 * 60; // 1 hora
+
+function registrarActividad(leadId) {
+  ultimaActividad.set(leadId, Date.now());
+}
+
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [hash, timestamp] of archivosProcesados.entries()) {
+    if (ahora - timestamp > TIEMPO_EXPIRACION) {
+      archivosProcesados.delete(hash);
+    }
+  };
+}, 1000 * 60 * 10); // cada 10 minutos
+
+// ===============================
+// 🧹 LIMPIEZA AUTOMÁTICA DE LEADS INACTIVOS
+// ===============================
+setInterval(() => {
+  const ahora = Date.now();
+
+  for (const [leadId, timestamp] of ultimaActividad.entries()) {
+    if (ahora - timestamp > TIEMPO_EXPIRACION_MAPS) {
+      memoriaChat.delete(leadId);
+      bufferMensajes.delete(leadId);
+      registrosPendientes.delete(leadId);
+      colasDeEspera.delete(leadId);
+      ultimaActividad.delete(leadId);
+    }
+  }
+}, 1000 * 60 * 15); // cada 15 minutos
 function gestionarMemoria(leadId, nuevoMensaje) {
   if (!memoriaChat.has(leadId)) {
     memoriaChat.set(leadId, []);
@@ -85,23 +83,12 @@ function gestionarMemoria(leadId, nuevoMensaje) {
   return historial;
 }
 
-async function buscarDesdeLeadFiles(leadId) {
+async function buscarDesdeLeadFiles(leadId, config, kommoApi) {
   try {
     const { data } = await kommoApi.get(`/api/v4/leads/${leadId}/files`);
     const files = data._embedded?.files || [];
     console.log("📂 Archivos encontrados:", files.length);
 
-files.forEach((file, index) => {
-  console.log(`\n📎 Archivo #${index + 1}`);
-  console.log("UUID:", file.file_uuid);
-  console.log("Nombre:", file.name);
-  console.log("Fecha (timestamp):", file.created_at);
-  console.log("Fecha legible:", new Date(file.created_at * 1000));
-  console.log("Tamaño:", file.size);
-  console.log("Metadata completo:", file.metadata);
-  console.log("Tipo MIME:", file.metadata?.mime_type);
-  console.log("Objeto completo:", JSON.stringify(file, null, 2));
-});
     if (!files.length) return null;
 
     const fileUuid = files[0].file_uuid;
@@ -109,7 +96,7 @@ files.forEach((file, index) => {
     const driveApiUrl = `https://drive-c.kommo.com/v1.0/files/${fileUuid}`;
 
     const { data: driveFile } = await axios.get(driveApiUrl, {
-      headers: { Authorization: `Bearer ${KOMMO_LONG_TOKEN}` }
+      headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
     });
 
     return driveFile._links?.download?.href;
@@ -118,20 +105,20 @@ files.forEach((file, index) => {
   }
 }
 
-async function buscarComprobante(leadId) {
+async function buscarComprobante(leadId, config, kommoApi) {
   for (let i = 1; i <= 6; i++) {
-    const url = await buscarDesdeLeadFiles(leadId);
+    const url = await buscarDesdeLeadFiles(leadId, config, kommoApi);
     if (url) return url;
     await sleep(2000);
   }
   return null;
 }
 
-async function descargarImagen(url, leadId) {
+async function descargarImagen(url, leadId, config) {
   try {
     const response = await axios.get(url, {
       responseType: "arraybuffer",
-      headers: { Authorization: `Bearer ${KOMMO_LONG_TOKEN}` }
+      headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
     });
 
     const filePath = path.join(
@@ -147,7 +134,7 @@ async function descargarImagen(url, leadId) {
   }
 }
 
-async function enviarDiscord(filePath, usuario, leadId) {
+async function enviarDiscord(filePath, usuario, leadId, config) {
   try {
     const form = new FormData();
 
@@ -162,7 +149,7 @@ async function enviarDiscord(filePath, usuario, leadId) {
 
     form.append("file", fs.createReadStream(filePath));
 
-    await axios.post(DISCORD_WEBHOOK, form, {
+    await axios.post(config.DISCORD_WEBHOOK, form, {
       headers: form.getHeaders()
     });
 
@@ -222,7 +209,7 @@ function saludoCompleto(usuarioExistente) {
   return `${saludo} ${nombre}, te paso CBU?`;
 }
 
-function calcularBono(usuario) {
+function calcularBono(usuario, config) {
 
   const nuncaCargo =
     !usuario ||
@@ -235,16 +222,15 @@ function calcularBono(usuario) {
 
   const hora = obtenerHoraArgentina();
 
-  const HORAS_100 = [0, 10, 15];
 
-  if (HORAS_100.includes(hora)) {
+ if (config.HORAS_100.includes(hora)) {
     return "100% activo, aprovechalo❤️";
   }
 
   return "50% bono del dia❤️";
 }
 /* ================= DETECTOR NOMBRE ================= */
-async function detectarNombreIA(mensaje) {
+async function detectarNombreIA(mensaje, openai) {
 
   const prompt = `
 Analiza el mensaje del usuario.
@@ -282,7 +268,7 @@ Mensaje:
   return JSON.parse(completion.choices[0].message.content);
 }
 /* ================= DETECTOR INTELIGENTE ================= */
-async function detectarAccionIA(mensaje) {
+async function detectarAccionIA(mensaje, openai) {
 
   const prompt = `
 Analiza el mensaje del cliente y responde SOLO JSON.
@@ -340,7 +326,7 @@ Responde SOLO este formato JSON:
 }
 
 /* ================= FLUJO PRINCIPAL ================= */
-async function procesarFlujoGPT(leadId, mensajeUnificado) {
+async function procesarFlujoGPT(leadId, mensajeUnificado, config, kommoApi, openai, clienteId) {
 
   const SYSTEM_PROMPT_NO_REGISTRADO = `
 Eres una mujer asistente oficial de una plataforma de juegos online.
@@ -414,7 +400,7 @@ Comportamiento:
       return;
     }
 
-    const usuarioExistente = await buscarUsuarioPorTelefono(telefono);
+    const usuarioExistente = await buscarUsuarioPorTelefono(telefono, clienteId);
 
 /* ======================================================
    AUTO-REGISTRO SI ENVÍA NOMBRE DIRECTAMENTE
@@ -422,7 +408,7 @@ Comportamiento:
 
 if (!usuarioExistente) {
 
-  const analisisNombreDirecto = await detectarNombreIA(mensajeUnificado);
+  const analisisNombreDirecto = await detectarNombreIA(mensajeUnificado, openai);
 
   if (analisisNombreDirecto?.resultado === "nombre_valido") {
 
@@ -431,27 +417,33 @@ if (!usuarioExistente) {
     const nombre = analisisNombreDirecto.nombre;
 
     const nuevoUsuario = await crearUsuarioEnDota({
-      nombreBase: nombre,
-      DOTA_DOMAIN,
-      DOTA_USER,
-      DOTA_PASS
-    });
+  nombreBase: nombre,
+  DOTA_DOMAIN: config.DOTA_DOMAIN,
+  DOTA_USER: config.DOTA_USER,
+  DOTA_PASS: config.DOTA_PASS,
+  DOTA_USER_SUFFIX: config.DOTA_USER_SUFFIX
+});
 
     if (!nuevoUsuario?.loginNuevo || !nuevoUsuario?.passDota) {
 
       await enviarMensajeYBot(
         leadId,
-        "Hubo un problema creando tu usuario. Intentá nuevamente en unos segundos."
+        "Hubo un problema creando tu usuario. Intentá nuevamente en unos segundos.", config, kommoApi
       );
 
       return;
     }
 
-    await guardarUsuario({
-      telefono,
-      nombre_usuario: nuevoUsuario.loginNuevo,
-      clave: nuevoUsuario.passDota
-    });
+const nuevo = await guardarUsuario({
+  telefono,
+  nombre_usuario: nuevoUsuario.loginNuevo,
+  clave: nuevoUsuario.passDota,
+  cliente: clienteId
+});
+
+if (!nuevo) {
+  console.log("Usuario ya existía, continuando flujo...");
+}
 
     const mensajeBienvenida =
 `Listo ${nombre}, ya está creado.
@@ -464,19 +456,23 @@ Clave: ${nuevoUsuario.passDota}`;
         name: nuevoUsuario.loginNuevo,
         custom_fields_values: [
           {
-            field_id: Number(KOMMO_FIELD_ID_CLAVE),
+            field_id: Number(config.KOMMO_FIELD_ID_CLAVE),
             values: [{ value: nuevoUsuario.passDota }]
           },
           {
-            field_id: Number(KOMMO_FIELD_ID_MENSAJEENVIAR),
+            field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
             values: [{ value: mensajeBienvenida }]
           }
         ]
       }
     ]);
 
-    await ejecutarSalesbot(leadId, KOMMO_SALESBOT_RESPUESTA);
-    await ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_PRIMERCBU);
+    await ejecutarSalesbot(
+  leadId,
+  config.KOMMO_SALESBOT_RESPUESTA,
+  kommoApi
+);
+    await ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_PRIMERCBU, kommoApi);
 
     return;
   }
@@ -488,34 +484,40 @@ Clave: ${nuevoUsuario.passDota}`;
 
     if (!usuarioExistente && registrosPendientes.has(leadId)) {
 
-      const analisis = await detectarNombreIA(mensajeUnificado);
+      const analisis = await detectarNombreIA(mensajeUnificado, openai);
 
       if (analisis?.resultado === "nombre_valido") {
 
         const nombre = analisis.nombre;
 
         const nuevoUsuario = await crearUsuarioEnDota({
-          nombreBase: nombre,
-          DOTA_DOMAIN,
-          DOTA_USER,
-          DOTA_PASS
-        });
+  nombreBase: nombre,
+  DOTA_DOMAIN: config.DOTA_DOMAIN,
+  DOTA_USER: config.DOTA_USER,
+  DOTA_PASS: config.DOTA_PASS,
+  DOTA_USER_SUFFIX: config.DOTA_USER_SUFFIX
+});
 
         if (!nuevoUsuario?.loginNuevo || !nuevoUsuario?.passDota) {
 
           await enviarMensajeYBot(
             leadId,
-            "Hubo un problema creando tu usuario. Intentá nuevamente en unos segundos."
+            "Hubo un problema creando tu usuario. Intentá nuevamente en unos segundos.", config, kommoApi
           );
 
           return;
         }
 
-        await guardarUsuario({
-          telefono,
-          nombre_usuario: nuevoUsuario.loginNuevo,
-          clave: nuevoUsuario.passDota
-        });
+const nuevo = await guardarUsuario({
+  telefono,
+  nombre_usuario: nuevoUsuario.loginNuevo,
+  clave: nuevoUsuario.passDota,
+  cliente: clienteId
+});
+
+if (!nuevo) {
+  console.log("Usuario ya existía, continuando flujo...");
+}
 
         registrosPendientes.delete(leadId);
 
@@ -530,26 +532,26 @@ Clave: ${nuevoUsuario.passDota}`;
             name: nuevoUsuario.loginNuevo,
             custom_fields_values: [
               {
-                field_id: Number(KOMMO_FIELD_ID_CLAVE),
+                field_id: Number(config.KOMMO_FIELD_ID_CLAVE),
                 values: [{ value: nuevoUsuario.passDota }]
               },
               {
-                field_id: Number(KOMMO_FIELD_ID_MENSAJEENVIAR),
+                field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
                 values: [{ value: mensajeBienvenida }]
               }
             ]
           }
         ]);
 
-        await ejecutarSalesbot(leadId, KOMMO_SALESBOT_RESPUESTA);
-        await ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_PRIMERCBU);
+        await ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
+        await ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_PRIMERCBU, kommoApi);
 
         return;
       }
 
       await enviarMensajeYBot(
         leadId,
-        "Necesito tu nombre o apodo para poder registrarte."
+        "Necesito tu nombre o apodo para poder registrarte.", config, kommoApi
       );
 
       return;
@@ -559,7 +561,7 @@ Clave: ${nuevoUsuario.passDota}`;
        DETECTAR INTENCIÓN
     ====================================================== */
 
-    const { accion } = await detectarAccionIA(mensajeUnificado);
+    const { accion } = await detectarAccionIA(mensajeUnificado, openai);
 
     console.log("🧠 Acción detectada:", accion);
 
@@ -570,7 +572,7 @@ Clave: ${nuevoUsuario.passDota}`;
 if (accion === "saludo") {
   await enviarMensajeYBot(
     leadId,
-    saludoCompleto(usuarioExistente)
+    saludoCompleto(usuarioExistente), config, kommoApi
   );
   return;
 }
@@ -578,7 +580,7 @@ if (accion === "saludo") {
 
       return await ejecutarSalesbot(
         leadId,
-        KOMMO_SALESBOT_ID_SOPORTE
+        config.KOMMO_SALESBOT_ID_SOPORTE, kommoApi
       );
 
     }
@@ -588,16 +590,16 @@ if (accion === "saludo") {
 ====================================================== */
 
 const accionesGenerales = {
-  comunidad: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_COMUNIDAD),
-  recomendar: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_RECOMENDAR),
-  recomende: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_RECOMENDE),
-  retirar: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_RETIRAR),
-  gratis: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_GRATIS),
-  sorteo: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_SORTEO),
-  link: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_LINK),
-  wager: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_WAGER),
-  transfirio: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_TRANSFIRIO),
-  cbu: () => ejecutarSalesbot(leadId, KOMMO_SALESBOT_ID_CBU),
+  comunidad: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_COMUNIDAD, kommoApi),
+  recomendar: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_RECOMENDAR, kommoApi),
+  recomende: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_RECOMENDE, kommoApi),
+  retirar: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_RETIRAR, kommoApi),
+  gratis: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_GRATIS, kommoApi),
+  sorteo: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_SORTEO, kommoApi),
+  link: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_LINK, kommoApi),
+  wager: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_WAGER, kommoApi),
+  transfirio: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_TRANSFIRIO, kommoApi),
+  cbu: () => ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_ID_CBU, kommoApi),
 };
 
 
@@ -613,7 +615,7 @@ if (!usuarioExistente) {
 
     await enviarMensajeYBot(
       leadId,
-      "Para darte accesos primero necesito registrarte. ¿Cómo te llamas?"
+      "Para darte accesos primero necesito registrarte. ¿Cómo te llamas?", config, kommoApi
     );
 
     return;
@@ -621,11 +623,11 @@ if (!usuarioExistente) {
 
   if (accion === "bono") {
 
-    const textoBono = calcularBono(null);
+    const textoBono = calcularBono(null, config);
 
     await enviarMensajeYBot(
       leadId,
-      `Bono disponible: ${textoBono}`
+      `Bono disponible: ${textoBono}`, config, kommoApi
     );
 
     return;
@@ -659,7 +661,7 @@ if (!usuarioExistente) {
     content: respuestaIA
   });
 
-  await enviarMensajeYBot(leadId, respuestaIA);
+  await enviarMensajeYBot(leadId, respuestaIA, config, kommoApi);
 
   return;
 }
@@ -676,18 +678,18 @@ if (accion === "accesos") {
 Usuario: ${usuarioExistente.nombre_usuario}
 Clave: ${usuarioExistente.clave}`;
 
-  await enviarMensajeYBot(leadId, msg);
+  await enviarMensajeYBot(leadId, msg, config, kommoApi);
 
   return;
 }
 
 if (accion === "bono") {
 
-  const textoBono = calcularBono(usuarioExistente);
+  const textoBono = calcularBono(usuarioExistente, config);
 
   await enviarMensajeYBot(
     leadId,
-    `Bono disponible: ${textoBono}`
+    `Bono disponible: ${textoBono}`, config, kommoApi
   );
 
   return;
@@ -725,7 +727,7 @@ if (accionesGenerales[accion]) {
       content: respuestaIA
     });
 
-    await enviarMensajeYBot(leadId, respuestaIA);
+    await enviarMensajeYBot(leadId, respuestaIA, config, kommoApi);
 
   } catch (error) {
 
@@ -741,20 +743,20 @@ if (accionesGenerales[accion]) {
   }
 }
 /* ================= HELPERS ================= */
-async function enviarMensajeYBot(leadId, mensaje) {
+async function enviarMensajeYBot(leadId, mensaje, config, kommoApi) {
   await kommoApi.patch(`/api/v4/leads/${leadId}`, {
     custom_fields_values: [
       {
-        field_id: Number(KOMMO_FIELD_ID_MENSAJEENVIAR),
+        field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
         values: [{ value: mensaje }]
       }
     ]
   });
 
-  await ejecutarSalesbot(leadId, KOMMO_SALESBOT_RESPUESTA);
+  await ejecutarSalesbot(leadId, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
 }
 
-async function ejecutarSalesbot(leadId, botId) {
+async function ejecutarSalesbot(leadId, botId, kommoApi) {
   await kommoApi.post("/api/v2/salesbot/run", [
     {
       bot_id: Number(botId),
@@ -766,11 +768,35 @@ async function ejecutarSalesbot(leadId, botId) {
 
 /* ================= WEBHOOK ================= */
 
-app.post("/webhook-kommo", async (req, res) => {
+import { kommoClients } from "./config/kommoClients.js";
 
+app.post("/webhook-kommo/:cliente", async (req, res) => {
+
+  const clienteId = req.params.cliente;
+  const config = kommoClients[clienteId];
+
+  if (!config) {
+    return res.status(404).send("Cliente no encontrado");
+  }
+
+  const kommoApi = axios.create({
+    baseURL: `https://${config.SUBDOMAIN_KOMMO}.kommo.com`,
+    headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
+  });
+
+axiosRetry(kommoApi, { retries: 3 });
+
+if (!config.OPENAI_API_KEY) {
+  console.error("Falta OPENAI_API_KEY para", clienteId);
+  return res.sendStatus(500);
+}
+
+const openai = new OpenAI({
+  apiKey: config.OPENAI_API_KEY
+});
   const leadId = getLeadId(req.body);
   if (!leadId) return res.sendStatus(200);
-
+  registrarActividad(leadId);
   try {
 
     const { data: lead } = await kommoApi.get(
@@ -779,7 +805,7 @@ app.post("/webhook-kommo", async (req, res) => {
 
     const mensajeCliente =
       lead.custom_fields_values?.find(
-        f => f.field_id == KOMMO_FIELD_ID_MENSAJEENVIAR
+        f => f.field_id == config.KOMMO_FIELD_ID_MENSAJEENVIAR
       )?.values?.[0]?.value;
 
 
@@ -797,7 +823,7 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
     if (!files.length) {
       await enviarMensajeYBot(
         leadId,
-        "No puedo recibir audios ni emojis, solo texto y capturas de comprobante porfis"
+        "No puedo recibir audios ni emojis, solo texto y capturas de comprobante porfis", config, kommoApi
       );
       return res.sendStatus(200);
     }
@@ -810,7 +836,7 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
       const driveApiUrl = `https://drive-c.kommo.com/v1.0/files/${file.file_uuid}`;
 
       const { data: driveFile } = await axios.get(driveApiUrl, {
-        headers: { Authorization: `Bearer ${KOMMO_LONG_TOKEN}` }
+        headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
       });
 
       archivosDrive.push(driveFile);
@@ -820,41 +846,42 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
     archivosDrive.sort((a, b) => b.created_at - a.created_at);
 
     // 🔍 Buscar primera imagen válida
-    const imagenValida = archivosDrive.find(file => {
+const imagenValida = archivosDrive.find(file => {
 
-      // Solo imágenes
-      if (file.type !== "image") return false;
+  if (file.type !== "image") return false;
 
-      // Solo enviadas por el usuario (no internas del sistema)
-      if (file.created_by?.type !== "external") return false;
+  if (file.created_by?.type !== "external") return false;
 
-      // Validar antigüedad (10 minutos)
-      const ahora = Math.floor(Date.now() / 1000); // en segundos
-      const diferenciaMinutos = (ahora - file.created_at) / 60;
+  // validar antigüedad (10 min)
+  const ahoraSeg = Math.floor(Date.now() / 1000);
+  const diferenciaMinutos = (ahoraSeg - file.created_at) / 60;
+  if (diferenciaMinutos > 10) return false;
 
-      if (diferenciaMinutos > 10) return false;
+  // evitar reprocesar (TTL)
+  const timestamp = archivosProcesados.get(file.uuid);
+  const ahoraMs = Date.now();
 
-      // No reprocesar
-      if (archivosProcesados.has(file.uuid)) return false;
+  if (timestamp && (ahoraMs - timestamp) < TIEMPO_EXPIRACION) {
+    return false;
+  }
 
-      return true;
-    });
-
+  return true;
+});
     if (!imagenValida) {
       await enviarMensajeYBot(
         leadId,
-        "No puedo recibir audios ni emojis, solo texto y capturas de comprobante porfis"
+        "No puedo recibir audios ni emojis, solo texto y capturas de comprobante porfis", config, kommoApi
       );
       return res.sendStatus(200);
     }
 
-    archivosProcesados.add(imagenValida.uuid);
+    archivosProcesados.set(imagenValida.uuid, Date.now());
 
     const downloadUrl = imagenValida._links?.download?.href;
 
     if (!downloadUrl) return res.sendStatus(200);
 
-    const filePath = await descargarImagen(downloadUrl, leadId);
+    const filePath = await descargarImagen(downloadUrl, leadId, config);
     if (!filePath) return res.sendStatus(200);
 
     // 🔍 Obtener usuario por teléfono
@@ -879,14 +906,14 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
       const telefono = normalizarTelefono(telefonoRaw);
 
       if (telefono) {
-        const usuarioDB = await buscarUsuarioPorTelefono(telefono);
+        const usuarioDB = await buscarUsuarioPorTelefono(telefono, clienteId);
         if (usuarioDB) nombreUsuario = usuarioDB.nombre_usuario;
       // 🔒 Si no existe usuario aún, NO enviar a Discord
 if (!usuarioDB) {
 
   await enviarMensajeYBot(
     leadId,
-    "Genial, ahora solo queda crear tu usuario. Decime tu nombre así lo creo!"
+    "Genial, ahora solo queda crear tu usuario. Decime tu nombre así lo creo!", config, kommoApi
   );
 
   return res.sendStatus(200);
@@ -894,7 +921,7 @@ if (!usuarioDB) {
       }
     }
 
-    await enviarDiscord(filePath, nombreUsuario, leadId);
+    await enviarDiscord(filePath, nombreUsuario, leadId, config);
 
     return res.sendStatus(200);
 
@@ -924,7 +951,7 @@ if (!usuarioDB) {
 
       bufferMensajes.delete(leadId);
 
-      await procesarFlujoGPT(leadId, mensajeUnificado);
+      await procesarFlujoGPT(leadId, mensajeUnificado, config, kommoApi, openai, clienteId );
 
     }, 5000);
 
@@ -938,14 +965,27 @@ if (!usuarioDB) {
 });
 
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */
+app.post("/webhook-ocr/:cliente", async (req, res) => {
 
-app.post("/webhook-ocr", async (req, res) => {
+  const clienteId = req.params.cliente;
+  const config = kommoClients[clienteId];
+
+  if (!config) {
+    return res.status(404).send("Cliente no encontrado");
+  }
 
   const { lead_id, resultado, monto } = req.body;
 
   if (!lead_id || !resultado) {
     return res.sendStatus(400);
   }
+
+const kommoApi = axios.create({
+  baseURL: `https://${config.SUBDOMAIN_KOMMO}.kommo.com`,
+  headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
+});
+
+axiosRetry(kommoApi, { retries: 3 });  
 
   console.log("📡 Resultado OCR recibido:", lead_id, resultado);
 
@@ -990,7 +1030,7 @@ if (telefono && monto) {
   );
 
   if (!isNaN(montoNumero)) {
-    await actualizarUltimaCarga(telefono, montoNumero);
+    await actualizarUltimaCarga(telefono, montoNumero, clienteId);
     console.log("💾 Última carga actualizada:", telefono, montoNumero);
   }
 }
@@ -1027,7 +1067,7 @@ if (telefono && monto) {
         mensaje = "Tu comprobante fue recibido.";
     }
 
-    await enviarMensajeYBot(lead_id, mensaje);
+    await enviarMensajeYBot(lead_id, mensaje, config, kommoApi);
 
     res.sendStatus(200);
 
@@ -1039,7 +1079,7 @@ if (telefono && monto) {
   }
 
 });
-
+const PORT = process.env.PORT || 3000;
 /* ================= FIN ================= */
 app.listen(PORT, () => {
   console.log(`🚀 Servidor en puerto ${PORT}`);
