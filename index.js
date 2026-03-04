@@ -848,16 +848,19 @@ if (!mensajeCliente || mensajeCliente.trim() === "") {
     // 🔍 Buscar primera imagen válida
 const imagenValida = archivosDrive.find(file => {
 
-  if (file.type !== "image") return false;
+  // 🔥 1. Debe tener link de descarga
+  if (!file._links?.download?.href) return false;
 
-  if (file.created_by?.type !== "external") return false;
+  // 🔥 2. Validar que sea imagen por MIME (más confiable)
+  const mime = file.metadata?.mime_type || "";
+  if (!mime.startsWith("image/")) return false;
 
-  // validar antigüedad (10 min)
+  // 🔥 3. Validar antigüedad (10 min)
   const ahoraSeg = Math.floor(Date.now() / 1000);
   const diferenciaMinutos = (ahoraSeg - file.created_at) / 60;
   if (diferenciaMinutos > 10) return false;
 
-  // evitar reprocesar (TTL)
+  // 🔥 4. Evitar reprocesar
   const timestamp = archivosProcesados.get(file.uuid);
   const ahoraMs = Date.now();
 
