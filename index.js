@@ -206,7 +206,7 @@ function saludoCompleto(usuarioExistente) {
     ? usuarioExistente.nombre_usuario
     : "corazón";
 
-  return `${saludo} ${nombre}, te paso CBU?`;
+  return `${saludo} ${nombre}, como te ayudo?`;
 }
 
 function calcularBono(usuario, config) {
@@ -573,6 +573,11 @@ if (accion === "saludo") {
   await enviarMensajeYBot(
     leadId,
     saludoCompleto(usuarioExistente), config, kommoApi
+  );
+    await ejecutarSalesbot(
+    leadId,
+    config.KOMMO_SALESBOT_ID_ELEGIR, 
+    kommoApi
   );
   return;
 }
