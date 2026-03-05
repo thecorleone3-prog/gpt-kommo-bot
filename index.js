@@ -967,6 +967,190 @@ if (!usuarioDB) {
   res.sendStatus(200);
 });
 
+/* ================= crear usuario manual kommo ================= */  
+app.post("/crear-usuario/:cliente", async (req, res) => {
+
+  const clienteId = req.params.cliente;
+  const config = kommoClients[clienteId];
+
+  if (!config) {
+    return res.status(404).json({ error: "Cliente no encontrado" });
+  }
+
+  const { lead_id } = req.body;
+
+  if (!lead_id) {
+    return res.status(400).json({ error: "Falta lead_id" });
+  }
+
+  const kommoApi = axios.create({
+    baseURL: `https://${config.SUBDOMAIN_KOMMO}.kommo.com`,
+    headers: { Authorization: `Bearer ${config.KOMMO_LONG_TOKEN}` }
+  });
+
+  axiosRetry(kommoApi, { retries: 3 });
+
+  try {
+
+    /* ===============================
+       1️⃣ OBTENER LEAD + CONTACTO
+    =============================== */
+
+    const { data: lead } = await kommoApi.get(
+      `/api/v4/leads/${lead_id}`,
+      { params: { with: "contacts" } }
+    );
+
+    const nombreBase = lead.name || "Usuario";
+
+    const contactoId = lead._embedded?.contacts?.[0]?.id;
+
+    if (!contactoId) {
+      return res.status(400).json({ error: "Lead sin contacto asociado" });
+    }
+
+    const { data: contacto } = await kommoApi.get(
+      `/api/v4/contacts/${contactoId}`
+    );
+
+    const telefonoRaw = contacto.custom_fields_values?.find(
+      f => f.field_code === "PHONE"
+    )?.values?.[0]?.value;
+
+    const telefono = normalizarTelefono(telefonoRaw);
+
+    if (!telefono) {
+      return res.status(400).json({ error: "Contacto sin teléfono válido" });
+    }
+
+    /* ===============================
+       2️⃣ VERIFICAR SI YA EXISTE
+    =============================== */
+
+    const usuarioExistente = await buscarUsuarioPorTelefono(
+      telefono,
+      clienteId
+    );
+
+    if (usuarioExistente) {
+
+      const mensajeBienvenida =
+`Tus accesos:
+Usuario: ${usuarioExistente.nombre_usuario}
+Clave: ${usuarioExistente.clave}`;
+
+      await kommoApi.patch("/api/v4/leads", [
+        {
+          id: Number(lead_id),
+          custom_fields_values: [
+            {
+              field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
+              values: [{ value: mensajeBienvenida }]
+            }
+          ]
+        }
+      ]);
+
+      await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
+
+      return res.json({
+        status: "ya_existia"
+      });
+    }
+
+    /* ===============================
+       3️⃣ CREAR USUARIO EN DOTA
+    =============================== */
+
+    const nuevoUsuario = await crearUsuarioEnDota({
+      nombreBase,
+      DOTA_DOMAIN: config.DOTA_DOMAIN,
+      DOTA_USER: config.DOTA_USER,
+      DOTA_PASS: config.DOTA_PASS,
+      DOTA_USER_SUFFIX: config.DOTA_USER_SUFFIX
+    });
+
+    if (!nuevoUsuario?.loginNuevo || !nuevoUsuario?.passDota) {
+      return res.status(500).json({
+        error: "No se pudo crear usuario en Dota"
+      });
+    }
+
+    /* ===============================
+       4️⃣ GUARDAR EN DB (MISMA LÓGICA)
+    =============================== */
+
+    const nuevo = await guardarUsuario({
+      telefono,
+      nombre_usuario: nuevoUsuario.loginNuevo,
+      clave: nuevoUsuario.passDota,
+      cliente: clienteId
+    });
+
+    if (!nuevo) {
+      console.log("Usuario ya existía, continuando flujo...");
+    }
+
+    /* ===============================
+       5️⃣ ARMAR MENSAJE BIENVENIDA
+    =============================== */
+
+    const mensajeBienvenida =
+`Listo ${nombreBase}, ya está listo.
+Usuario: ${nuevoUsuario.loginNuevo}
+Clave: ${nuevoUsuario.passDota}`;
+
+    /* ===============================
+       6️⃣ ACTUALIZAR LEAD
+    =============================== */
+
+    await kommoApi.patch("/api/v4/leads", [
+      {
+        id: Number(lead_id),
+        name: nuevoUsuario.loginNuevo,
+        custom_fields_values: [
+          {
+            field_id: Number(config.KOMMO_FIELD_ID_CLAVE),
+            values: [{ value: nuevoUsuario.passDota }]
+          },
+          {
+            field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
+            values: [{ value: mensajeBienvenida }]
+          }
+        ]
+      }
+    ]);
+
+    /* ===============================
+       7️⃣ EJECUTAR SALESBOTS
+    =============================== */
+
+    await ejecutarSalesbot(
+      lead_id,
+      config.KOMMO_SALESBOT_RESPUESTA,
+      kommoApi
+    );
+
+    await ejecutarSalesbot(
+      lead_id,
+      config.KOMMO_SALESBOT_ID_PRIMERCBU,
+      kommoApi
+    );
+
+    return res.json({
+      status: "success"
+    });
+
+  } catch (error) {
+
+    console.error("❌ Error crear-usuario:", error.message);
+
+    return res.status(500).json({
+      error: "Error interno",
+      detalle: error.message
+    });
+  }
+});
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */
 app.post("/webhook-ocr/:cliente", async (req, res) => {
 
