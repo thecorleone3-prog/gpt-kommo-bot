@@ -1036,7 +1036,7 @@ if (!lead_id) {
     if (usuarioExistente) {
 
       const mensajeBienvenida =
-`Tus accesos:
+`Ya tenes usuario, tus accesos:
 Usuario: ${usuarioExistente.nombre_usuario}
 Clave: ${usuarioExistente.clave}`;
 
