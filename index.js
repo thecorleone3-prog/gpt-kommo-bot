@@ -977,11 +977,12 @@ app.post("/crear-usuario/:cliente", async (req, res) => {
     return res.status(404).json({ error: "Cliente no encontrado" });
   }
 
-  const { lead_id } = req.body;
+const lead_id = getLeadId(req.body);
 
-  if (!lead_id) {
-    return res.status(400).json({ error: "Falta lead_id" });
-  }
+if (!lead_id) {
+  console.log("❌ crear-usuario: No llegó leadId", req.body);
+  return res.status(400).json({ error: "No llegó lead_id" });
+}
 
   const kommoApi = axios.create({
     baseURL: `https://${config.SUBDOMAIN_KOMMO}.kommo.com`,
