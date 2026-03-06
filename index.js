@@ -229,6 +229,15 @@ function calcularBono(usuario, config) {
 
   return "50% bono del dia❤️";
 }
+app.get("/kommo/install", async (req, res) => {
+
+  const { code, client_id } = req.query;
+
+  console.log("Instalación Kommo:", code, client_id);
+
+  res.send("Instalación correcta");
+
+});
 /* ================= DETECTOR NOMBRE ================= */
 async function detectarNombreIA(mensaje, openai) {
 
@@ -679,7 +688,7 @@ if (!usuarioExistente) {
 if (accion === "accesos") {
 
   const msg =
-`Tus accesos:
+`Ya tenes usuario, tus accesos:
 Usuario: ${usuarioExistente.nombre_usuario}
 Clave: ${usuarioExistente.clave}`;
 
@@ -1236,7 +1245,7 @@ if (telefono && monto) {
   break;
 
       case "duplicado":
-        mensaje = "Este comprobante ya fue enviado anteriormente. Si crees que es un error avisanos.";
+        mensaje = "Este comprobante ya fue enviado anteriormente. Si crees que es un error escribi: SOPORTE.";
         break;
 
       case "pendiente":
@@ -1253,7 +1262,7 @@ if (telefono && monto) {
 
       case "error_servidor":
       case "error_critico":
-        mensaje = "Hubo un problema procesando tu comprobante. Intentá nuevamente.";
+        mensaje = "Hubo un problema procesando tu comprobante. Envialo nuevamente.";
         break;
 
       default:
