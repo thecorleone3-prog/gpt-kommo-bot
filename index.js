@@ -229,15 +229,6 @@ function calcularBono(usuario, config) {
 
   return "50% bono del dia❤️";
 }
-app.get("/kommo/install", async (req, res) => {
-
-  const { code, client_id } = req.query;
-
-  console.log("Instalación Kommo:", code, client_id);
-
-  res.send("Instalación correcta");
-
-});
 /* ================= DETECTOR NOMBRE ================= */
 async function detectarNombreIA(mensaje, openai) {
 
