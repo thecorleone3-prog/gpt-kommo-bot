@@ -11,6 +11,7 @@ import {colasDeEspera,bufferMensajes,archivosProcesados,registrarActividad,TIEMP
 import { descargarImagen, enviarDiscord } from "./services/fileService.js";
 import { enviarMensajeYBot, ejecutarSalesbot } from "./services/kommoBotService.js";
 import { procesarFlujoGPT } from "./services/chatFlowService.js";
+import { buscarUsuarioEnKommoPorTelefono } from "./services/syncKommoUser.js";
 dotenv.config();
 
 const app = express();
@@ -111,17 +112,54 @@ const imagenValida = archivosDrive.find(file => {
       );
       const telefono = obtenerTelefono(contacto);
       if (telefono) {
-        const usuarioDB = await buscarUsuarioPorTelefono(telefono, clienteId);
-        if (usuarioDB) nombreUsuario = usuarioDB.nombre_usuario;
-        
-      // 🔒 Si no existe usuario aún, NO enviar a Discord
+let usuarioDB = await buscarUsuarioPorTelefono(telefono, clienteId);
+
 if (!usuarioDB) {
+
+  console.log("🔎 Usuario no encontrado en DB, buscando en Kommo...");
+
+try {
+  const usuarioKommo = await buscarUsuarioEnKommoPorTelefono(
+    telefono,
+    config,
+    kommoApi
+  );
+  if (!usuarioKommo) {
+    console.log("ℹ️ No existe usuario válido en Kommo");
+  } else {
+    console.log("🔄 Usuario encontrado en Kommo, sincronizando...");
+    await guardarUsuario({
+      telefono,
+      nombre_usuario: usuarioKommo.nombre_usuario,
+      clave: usuarioKommo.clave,
+      cliente: clienteId
+    });
+    // actualizar variable
+    usuarioDB = usuarioKommo;
+  }
+
+} catch (e) {
+
+  console.log("⚠️ Error buscando usuario en Kommo:", e.message);
+
+}
+}
+
+// 🔒 Si todavía no existe
+if (!usuarioDB) {
+
   await enviarMensajeYBot(
     leadId,
-    "Genial, ahora solo queda crear tu usuario. Decime tu nombre así lo creo!", config, kommoApi
+    "Genial, ahora solo queda crear tu usuario. Decime tu nombre así lo creo!",
+    config,
+    kommoApi
   );
+
   return res.sendStatus(200);
+
 }
+
+nombreUsuario = usuarioDB.nombre_usuario;
       }
     }
 
