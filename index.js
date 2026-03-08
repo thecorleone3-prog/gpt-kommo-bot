@@ -417,7 +417,7 @@ const kommoApi = crearKommoApi(config);
 
 case "exito":
 
-  mensaje = "Comprobante verificado correctamente. Tu carga fue acreditada.";
+  mensaje = "Tu carga fue acreditada❤️ responde Gratis para mas premios";
 
   try {
 
