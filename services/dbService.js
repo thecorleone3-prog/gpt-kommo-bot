@@ -21,14 +21,6 @@ const supabase = createClient(
 );
 
 /* ============================= */
-/*          INIT DB              */
-/* ============================= */
-
-async function initDB() {
-  console.log("✅ Supabase conectado");
-}
-
-/* ============================= */
 /*     BUSCAR USUARIO            */
 /* ============================= */
 /*
@@ -115,7 +107,6 @@ async function actualizarUltimaCarga(telefono, monto, cliente) {
 /* ============================= */
 
 export {
-  initDB,
   buscarUsuarioPorTelefono,
   guardarUsuario,
   actualizarUltimaCarga
