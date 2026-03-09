@@ -7,7 +7,7 @@ async function enviarMensajeYBot(leadId, mensaje, config, kommoApi) {
       }
     ]
   });
-  await new Promise(r => setTimeout(r, 1100));
+  await new Promise(r => setTimeout(r, 3000));
   const botId = Number(config.KOMMO_SALESBOT_RESPUESTA);
   if (!botId) {
     console.log("Bot ID inválido");
