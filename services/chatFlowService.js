@@ -5,6 +5,7 @@ import { enviarMensajeYBot, ejecutarSalesbot } from "./kommoBotService.js";
 import { registrarUsuario } from "./registerUser.js";
 import { detectarNombreIA, detectarAccionIA } from "./aiService.js";
 import { buscarUsuarioEnKommoPorTelefono } from "./syncKommoUser.js";
+import { cacheLeadData } from "./chatMemory.js";
 
 /* ================= FLUJO PRINCIPAL ================= */
 export async function procesarFlujoGPT(leadId, mensajeUnificado, config, kommoApi, openai, clienteId) {
@@ -52,30 +53,48 @@ Comportamiento:
 
   try {
 
-    console.log(`🎬 Procesando Lead: ${leadId}`);
+console.log(`🎬 Procesando Lead: ${leadId}`);
 
-    const { data: lead } = await kommoApi.get(
-      `/api/v4/leads/${leadId}`,
-      { params: { with: "contacts" } }
-    );
+let telefono;
+let contactoId;
 
-    const contactoId = lead._embedded?.contacts?.[0]?.id;
+let leadData = cacheLeadData.get(leadId);
 
-    if (!contactoId) {
-      console.log("⚠️ Lead sin contacto asociado");
-      return;
-    }
+if (!leadData) {
 
-    const { data: contacto } = await kommoApi.get(
-      `/api/v4/contacts/${contactoId}`
-    );
+  const { data: lead } = await kommoApi.get(
+    `/api/v4/leads/${leadId}`,
+    { params: { with: "contacts" } }
+  );
 
-    const telefono = obtenerTelefono(contacto);
+  contactoId = lead._embedded?.contacts?.[0]?.id;
 
-    if (!telefono) {
-      console.log("⚠️ Contacto sin teléfono válido");
-      return;
-    }
+  if (!contactoId) {
+    console.log("⚠️ Lead sin contacto asociado");
+    return;
+  }
+
+  const { data: contacto } = await kommoApi.get(
+    `/api/v4/contacts/${contactoId}`
+  );
+
+  telefono = obtenerTelefono(contacto);
+
+  if (!telefono) {
+    console.log("⚠️ Contacto sin teléfono válido");
+    return;
+  }
+
+  leadData = { telefono, contactoId };
+
+  cacheLeadData.set(leadId, leadData);
+
+} else {
+
+  telefono = leadData.telefono;
+  contactoId = leadData.contactoId;
+
+}
 
     let usuarioExistente = await buscarUsuarioPorTelefono(telefono, clienteId);
 
@@ -363,8 +382,6 @@ if (accionesGenerales[accion]) {
     );
 
   } finally {
-
     colasDeEspera.delete(leadId);
-
   }
 }

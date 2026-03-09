@@ -8,6 +8,7 @@ const TIEMPO_EXPIRACION = 1000 * 60 * 60; // 1 hora
 const MAX_HISTORIAL = 10;
 const ultimaActividad = new Map();
 const TIEMPO_EXPIRACION_MAPS = 1000 * 60 * 60; // 1 hora
+const cacheLeadData = new Map();
 function registrarActividad(leadId) {
   ultimaActividad.set(leadId, Date.now());
 }
@@ -28,6 +29,7 @@ setInterval(() => {
       bufferMensajes.delete(leadId);
       registrosPendientes.delete(leadId);
       colasDeEspera.delete(leadId);
+      cacheLeadData.delete(leadId);
       ultimaActividad.delete(leadId);
     }
   }
@@ -52,6 +54,7 @@ export {
   ultimaActividad,
   registrarActividad,
   gestionarMemoria,
-  TIEMPO_EXPIRACION
+  TIEMPO_EXPIRACION,
+  cacheLeadData
 };
 
