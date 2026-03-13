@@ -417,7 +417,7 @@ const kommoApi = crearKommoApi(config);
 
 case "exito":
 
-  mensaje = "Tu carga fue acreditada❤️ responde Gratis para mas premios";
+  mensaje = "Tu carga fue acreditada ❤️\nSi recomendas a un amigo obtenes 6mil por cada uno\nPor 5 amigos 6mil adicionales (36mil en Total)";
 
   try {
 
