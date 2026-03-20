@@ -42,37 +42,32 @@ async function buscarUsuarioPorTelefono(telefono, cliente) {
   return data || null;
 }
 
-/* ============================= */
-/*      GUARDAR USUARIO          */
-/* ============================= */
-/*
-  🔥 Requiere cliente
-*/
+
 async function guardarUsuario(data) {
   const { data: inserted, error } = await supabase
     .from("usuarios")
-    .insert([
+    .upsert(
+      [
+        {
+          telefono: data.telefono,
+          nombre_usuario: data.nombre_usuario,
+          user_id_dota: data.user_id_dota || null,
+          clave: data.clave,
+          cliente: data.cliente,
+          lead_id: data.lead_id || null,
+          titular: null,
+          cuit: null,
+          gmail: null
+        }
+      ],
       {
-        telefono: data.telefono,
-        nombre_usuario: data.nombre_usuario,
-        user_id_dota: data.user_id_dota || null,
-        clave: data.clave,
-        cliente: data.cliente,
-        titular: null,
-        cuit: null,
-        gmail: null
+        onConflict: "telefono,cliente" // 🔥 CLAVE
       }
-    ])
+    )
     .select()
     .single();
 
   if (error) {
-    // 🔥 Manejo específico duplicado
-    if (error.code === "23505") {
-      console.log("⚠ Usuario ya existe para este cliente");
-      return null;
-    }
-
     console.error("Error guardando usuario:", error.message);
     throw error;
   }
@@ -102,12 +97,24 @@ async function actualizarUltimaCarga(telefono, monto, cliente) {
   }
 }
 
-/* ============================= */
-/*           EXPORTS             */
-/* ============================= */
+async function actualizarLeadId(telefono, cliente, leadId) {
+  const { error } = await supabase
+    .from("usuarios")
+    .update({
+      lead_id: leadId,
+      updated_at: new Date().toISOString()
+    })
+    .eq("telefono", telefono)
+    .eq("cliente", cliente);
 
+  if (error) {
+    console.error("Error actualizando lead_id:", error.message);
+    throw error;
+  }
+}
 export {
   buscarUsuarioPorTelefono,
   guardarUsuario,
-  actualizarUltimaCarga
+  actualizarUltimaCarga,
+  actualizarLeadId
 };

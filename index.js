@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { crearUsuarioEnDota } from "./services/dotaService.js";
 import { kommoClients } from "./config/kommoClients.js";
-import {buscarUsuarioPorTelefono,guardarUsuario,actualizarUltimaCarga} from "./services/dbService.js";
+import {buscarUsuarioPorTelefono,guardarUsuario,actualizarUltimaCarga,actualizarLeadId} from "./services/dbService.js";
 import {getLeadId,obtenerTelefono} from "./utils/utilsGenerales.js";
 import {colasDeEspera,bufferMensajes,archivosProcesados,registrarActividad,TIEMPO_EXPIRACION} from "./services/chatMemory.js";
 import { descargarImagen, enviarDiscord } from "./services/fileService.js";
@@ -192,6 +192,7 @@ nombreUsuario = usuarioDB.nombre_usuario;
       console.log("🧠 Procesando mensaje unificado:", mensajeUnificado);
 
       bufferMensajes.delete(leadId);
+      colasDeEspera.delete(leadId);
 
       await procesarFlujoGPT(leadId, mensajeUnificado, config, kommoApi, openai, clienteId );
 
@@ -271,6 +272,10 @@ if (!lead_id) {
     );
 
     if (usuarioExistente) {
+
+      if (usuarioExistente.lead_id !== lead_id) {
+  await actualizarLeadId(telefono, clienteId, lead_id);
+}
 
       const mensajeBienvenida =
 `Ya tenes usuario, tus accesos:
@@ -387,6 +392,56 @@ Clave: ${nuevoUsuario.passDota}`;
       error: "Error interno",
       detalle: error.message
     });
+  }
+});
+/* ================= Actualizar leadid de kommo en db ================= */  
+app.post("/webhook-lead-update/:cliente", async (req, res) => {
+  const clienteId = req.params.cliente;
+
+  try {
+    const leadId = getLeadId(req.body);
+    if (!leadId) return res.json({ status: "no_lead" });
+
+    const config = kommoClients[clienteId];
+    if (!config) {
+  return res.status(404).json({ error: "cliente no encontrado" });
+}
+    const kommoApi = crearKommoApi(config);
+
+    const { data: lead } = await kommoApi.get(
+      `/api/v4/leads/${leadId}`,
+      { params: { with: "contacts" } }
+    );
+
+    const contactoId = lead._embedded?.contacts?.[0]?.id;
+    if (!contactoId) return res.json({ status: "sin_contacto" });
+
+    const { data: contacto } = await kommoApi.get(
+      `/api/v4/contacts/${contactoId}`
+    );
+
+    const telefono = obtenerTelefono(contacto);
+    if (!telefono) return res.json({ status: "sin_telefono" });
+
+    const usuario = await buscarUsuarioPorTelefono(telefono, clienteId);
+
+    if (!usuario) {
+      return res.json({ status: "no_existe" });
+    }
+
+    if (usuario.lead_id !== leadId) {
+  await actualizarLeadId(telefono, clienteId, leadId);
+}
+
+    return res.json({
+      status: "updated",
+      telefono,
+      leadId
+    });
+
+  } catch (err) {
+    console.error("❌ webhook lead update:", err.message);
+    return res.status(500).json({ error: "error interno" });
   }
 });
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */

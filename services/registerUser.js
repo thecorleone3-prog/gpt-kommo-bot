@@ -29,12 +29,13 @@ export async function registrarUsuario({
     return null;
   }
 
-  await guardarUsuario({
-    telefono,
-    nombre_usuario: nuevoUsuario.loginNuevo,
-    clave: nuevoUsuario.passDota,
-    cliente: clienteId
-  });
+await guardarUsuario({
+  telefono,
+  nombre_usuario: nuevoUsuario.loginNuevo,
+  clave: nuevoUsuario.passDota,
+  cliente: clienteId,
+  lead_id: leadId // 🔥 CLAVE
+});
 
   const mensajeBienvenida = `Listo ${nombre}, ya está creado.
 Usuario: ${nuevoUsuario.loginNuevo}
