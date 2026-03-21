@@ -327,7 +327,8 @@ Clave: ${usuarioExistente.clave}`;
       telefono,
       nombre_usuario: nuevoUsuario.loginNuevo,
       clave: nuevoUsuario.passDota,
-      cliente: clienteId
+      cliente: clienteId,
+      lead_id: lead_id
     });
 
     if (!nuevo) {
