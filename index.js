@@ -445,6 +445,68 @@ app.post("/webhook-lead-update/:cliente", async (req, res) => {
     return res.status(500).json({ error: "error interno" });
   }
 });
+/* ================= notificar carga a leadid kommo ================= */  
+app.post("/notificar-carga", async (req, res) => {
+  const { username, monto, cliente } = req.body;
+
+  if (!username || !cliente) {
+    return res.status(400).json({
+      error: "Faltan datos (username, cliente)"
+    });
+  }
+
+  const config = kommoClients[cliente];
+
+  if (!config) {
+    return res.status(404).json({
+      error: "Cliente no configurado"
+    });
+  }
+
+  const kommoApi = crearKommoApi(config);
+
+  try {
+    // 🔍 BUSCAR USUARIO EN DB
+    const { data, error } = await supabase
+      .from("usuarios")
+      .select("lead_id, nombre_usuario")
+      .eq("nombre_usuario", username)
+      .eq("cliente", cliente)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data || !data.lead_id) {
+      return res.status(404).json({
+        error: "Usuario sin lead_id",
+        username
+      });
+    }
+
+    // 🚀 DISPARAR SALESBOT
+    await ejecutarSalesbot(
+      data.lead_id,
+      config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
+      kommoApi
+    );
+
+    return res.json({
+      ok: true,
+      lead_id: data.lead_id,
+      username,
+      monto
+    });
+
+  } catch (err) {
+    console.error("❌ Error notificar-carga:", err.message);
+
+    return res.status(500).json({
+      error: "Error interno",
+      detalle: err.message
+    });
+  }
+});
+
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */
 app.post("/webhook-ocr/:cliente", async (req, res) => {
 
