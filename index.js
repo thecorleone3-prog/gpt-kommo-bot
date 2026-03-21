@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { crearUsuarioEnDota } from "./services/dotaService.js";
 import { kommoClients } from "./config/kommoClients.js";
-import {buscarUsuarioPorTelefono,guardarUsuario,actualizarUltimaCarga,actualizarLeadId} from "./services/dbService.js";
+import {buscarUsuarioPorTelefono,guardarUsuario,actualizarUltimaCarga,actualizarLeadId,buscarUsuarioPorUsername} from "./services/dbService.js";
 import {getLeadId,obtenerTelefono} from "./utils/utilsGenerales.js";
 import {colasDeEspera,bufferMensajes,archivosProcesados,registrarActividad,TIEMPO_EXPIRACION} from "./services/chatMemory.js";
 import { descargarImagen, enviarDiscord } from "./services/fileService.js";
@@ -466,17 +466,18 @@ app.post("/notificar-carga", async (req, res) => {
   const kommoApi = crearKommoApi(config);
 
   try {
-    // 🔍 BUSCAR USUARIO EN DB
-    const { data, error } = await supabase
-      .from("usuarios")
-      .select("lead_id, nombre_usuario")
-      .eq("nombre_usuario", username)
-      .eq("cliente", cliente)
-      .maybeSingle();
 
-    if (error) throw error;
+    console.log("📩 notificar-carga:", { username, cliente, monto });
 
-    if (!data || !data.lead_id) {
+    // 🔍 BUSCAR USUARIO EN DB (USANDO SERVICE)
+    const usuario = await buscarUsuarioPorUsername(
+      String(username).toLowerCase().trim(),
+      cliente
+    );
+
+    console.log("🔎 Usuario DB:", usuario);
+
+    if (!usuario || !usuario.lead_id) {
       return res.status(404).json({
         error: "Usuario sin lead_id",
         username
@@ -485,14 +486,14 @@ app.post("/notificar-carga", async (req, res) => {
 
     // 🚀 DISPARAR SALESBOT
     await ejecutarSalesbot(
-      data.lead_id,
+      usuario.lead_id,
       config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
       kommoApi
     );
 
     return res.json({
       ok: true,
-      lead_id: data.lead_id,
+      lead_id: usuario.lead_id,
       username,
       monto
     });

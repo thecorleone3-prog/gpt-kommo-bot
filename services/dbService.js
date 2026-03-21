@@ -112,9 +112,23 @@ async function actualizarLeadId(telefono, cliente, leadId) {
     throw error;
   }
 }
+export async function buscarUsuarioPorUsername(username, cliente) {
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("lead_id, nombre_usuario")
+    .eq("nombre_usuario", username)
+    .eq("cliente", cliente)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return data;
+}
+
 export {
   buscarUsuarioPorTelefono,
   guardarUsuario,
   actualizarUltimaCarga,
-  actualizarLeadId
+  actualizarLeadId,
+  buscarUsuarioPorUsername
 };
