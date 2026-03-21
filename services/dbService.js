@@ -112,16 +112,15 @@ async function actualizarLeadId(telefono, cliente, leadId) {
     throw error;
   }
 }
-async function buscarUsuarioPorUsername(username, cliente) {
+ async function buscarUsuarioPorUsername(username, cliente) {
   const { data, error } = await supabase
     .from("usuarios")
-    .select("lead_id, nombre_usuario")
-    .eq("nombre_usuario", username)
+    .select("*")
+    .ilike("nombre_usuario", username.trim()) // 🔥 cambio clave
     .eq("cliente", cliente)
     .maybeSingle();
 
   if (error) throw error;
-
   return data;
 }
 
