@@ -112,7 +112,7 @@ async function actualizarLeadId(telefono, cliente, leadId) {
     throw error;
   }
 }
-export async function buscarUsuarioPorUsername(username, cliente) {
+async function buscarUsuarioPorUsername(username, cliente) {
   const { data, error } = await supabase
     .from("usuarios")
     .select("lead_id, nombre_usuario")
