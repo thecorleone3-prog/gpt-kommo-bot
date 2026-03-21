@@ -3,36 +3,22 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-/* ============================= */
-/*   VALIDACIÓN DE VARIABLES     */
-/* ============================= */
-
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY) {
   throw new Error("❌ Faltan variables de entorno de Supabase");
 }
-
-/* ============================= */
-/*      CLIENTE SUPABASE         */
-/* ============================= */
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
 );
 
-/* ============================= */
-/*     BUSCAR USUARIO            */
-/* ============================= */
-/*
-  🔥 Ahora requiere cliente (tenant_id)
-*/
 async function buscarUsuarioPorTelefono(telefono, cliente) {
   const { data, error } = await supabase
     .from("usuarios")
     .select("*")
     .eq("telefono", telefono)
     .eq("cliente", cliente)
-    .maybeSingle(); // mejor que single() para evitar error si no existe
+    .maybeSingle(); 
 
   if (error) {
     console.error("Error buscando usuario:", error.message);
@@ -50,7 +36,7 @@ async function guardarUsuario(data) {
       [
         {
           telefono: data.telefono,
-          nombre_usuario: data.nombre_usuario,
+          nombre_usuario: data.nombre_usuario.toLowerCase().trim(),
           user_id_dota: data.user_id_dota || null,
           clave: data.clave,
           cliente: data.cliente,
@@ -112,11 +98,11 @@ async function actualizarLeadId(telefono, cliente, leadId) {
     throw error;
   }
 }
- async function buscarUsuarioPorUsername(username, cliente) {
+  async function buscarUsuarioPorUsername(username, cliente) {
   const { data, error } = await supabase
     .from("usuarios")
     .select("*")
-    .ilike("nombre_usuario", username.trim()) // 🔥 cambio clave
+    .eq("nombre_usuario", username.toLowerCase().trim()) // 🔥 clave
     .eq("cliente", cliente)
     .maybeSingle();
 
