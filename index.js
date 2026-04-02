@@ -231,9 +231,6 @@ if (!lead_id) {
   return res.status(400).json({ error: "No llegó lead_id" });
 }
 
-// --- 🔴 CAMBIO 1: RESPUESTA INMEDIATA PARA QUE KOMMO NO REINTENTE ---
-  res.status(200).json({ message: "Procesando" });
-
   const kommoApi = crearKommoApi(config);
 
   try {
@@ -252,7 +249,7 @@ if (!lead_id) {
     const contactoId = lead._embedded?.contacts?.[0]?.id;
 
     if (!contactoId) {
-      console.error("❌ Lead sin contacto asociado");
+      return res.status(400).json({ error: "Lead sin contacto asociado" });
     }
 
     const { data: contacto } = await kommoApi.get(
@@ -298,6 +295,10 @@ Clave: ${usuarioExistente.clave}`;
       ]);
 
       await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
+
+      return res.json({
+        status: "ya_existia"
+      });
     }
 
     /* ===============================
@@ -368,9 +369,22 @@ Clave: ${nuevoUsuario.passDota}`;
        7️⃣ EJECUTAR SALESBOTS
     =============================== */
 
-    await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
-    await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_ID_PRIMERCBU, kommoApi);
-    console.log(`✅ Usuario creado con éxito para lead ${lead_id}`);
+    await ejecutarSalesbot(
+      lead_id,
+      config.KOMMO_SALESBOT_RESPUESTA,
+      kommoApi
+    );
+
+    await ejecutarSalesbot(
+      lead_id,
+      config.KOMMO_SALESBOT_ID_PRIMERCBU,
+      kommoApi
+    );
+
+    return res.json({
+      status: "success"
+    });
+
   } catch (error) {
 
     console.error("❌ Error crear-usuario:", error.message);
