@@ -214,22 +214,51 @@ function crearKommoApi(config) {
   axiosRetry(api, { retries: 3 });
   return api;
 }
+/* ==========================================================
+   VARIABLE GLOBAL: EL ESCUDO ANTI-DUPLICADOS
+   (Debe estar fuera del app.post para que no se reinicie)
+========================================================== */
+const leadsEnProceso = new Set();
+
 /* ================= crear usuario manual kommo ================= */  
 app.post("/crear-usuario/:cliente", async (req, res) => {
 
   const clienteId = req.params.cliente;
   const config = kommoClients[clienteId];
 
+  // Estas validaciones iniciales sí pueden responder con error 
+  // porque todavía no le mandamos el 200 a Kommo
   if (!config) {
     return res.status(404).json({ error: "Cliente no encontrado" });
   }
 
-const lead_id = getLeadId(req.body);
+  const lead_id = getLeadId(req.body);
 
-if (!lead_id) {
-  console.log("❌ crear-usuario: No llegó leadId", req.body);
-  return res.status(400).json({ error: "No llegó lead_id" });
-}
+  if (!lead_id) {
+    console.log("❌ crear-usuario: No llegó leadId", req.body);
+    return res.status(400).json({ error: "No llegó lead_id" });
+  }
+
+  /* ===============================
+     🛡️ 1. FRENO DE MANO (RACE CONDITION)
+  =============================== */
+  if (leadsEnProceso.has(lead_id)) {
+    console.log(`🚫 Petición duplicada frenada para el lead: ${lead_id}`);
+    return res.status(200).json({ status: "bloqueado_por_seguridad" });
+  }
+
+  // Marcamos que este lead ya se está procesando
+  leadsEnProceso.add(lead_id);
+
+  /* ===============================
+     🚀 2. RESPUESTA INMEDIATA (CORTA EL TIMEOUT)
+  =============================== */
+  // Le decimos a Kommo "Ya lo tengo, no me lo mandes de nuevo"
+  res.status(200).json({ status: "procesando_en_background" });
+
+
+  // A partir de acá, el proceso corre de fondo. 
+  // ESTÁ PROHIBIDO USAR res.json() O res.status() AQUÍ ABAJO.
 
   const kommoApi = crearKommoApi(config);
 
@@ -238,18 +267,17 @@ if (!lead_id) {
     /* ===============================
        1️⃣ OBTENER LEAD + CONTACTO
     =============================== */
-
     const { data: lead } = await kommoApi.get(
       `/api/v4/leads/${lead_id}`,
       { params: { with: "contacts" } }
     );
 
     const nombreBase = lead.name || "Usuario";
-
     const contactoId = lead._embedded?.contacts?.[0]?.id;
 
     if (!contactoId) {
-      return res.status(400).json({ error: "Lead sin contacto asociado" });
+      console.error("❌ Lead sin contacto asociado");
+      return; // Corta la ejecución
     }
 
     const { data: contacto } = await kommoApi.get(
@@ -259,23 +287,22 @@ if (!lead_id) {
     const telefono = obtenerTelefono(contacto);
 
     if (!telefono) {
-      return res.status(400).json({ error: "Contacto sin teléfono válido" });
+      console.error("❌ Contacto sin teléfono válido");
+      return; // Corta la ejecución
     }
 
     /* ===============================
        2️⃣ VERIFICAR SI YA EXISTE
     =============================== */
-
     const usuarioExistente = await buscarUsuarioPorTelefono(
       telefono,
       clienteId
     );
 
     if (usuarioExistente) {
-
       if (usuarioExistente.lead_id !== lead_id) {
-  await actualizarLeadId(telefono, clienteId, lead_id);
-}
+        await actualizarLeadId(telefono, clienteId, lead_id);
+      }
 
       const mensajeBienvenida =
 `Ya tenes usuario, tus accesos:
@@ -295,16 +322,16 @@ Clave: ${usuarioExistente.clave}`;
       ]);
 
       await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
-
-      return res.json({
-        status: "ya_existia"
-      });
+      
+      console.log(`✅ Lead ${lead_id} ya existía. Mensaje enviado.`);
+      
+      // 🛡️ ESTE RETURN ES VITAL: Evita que siga bajando y sobreescriba la DB
+      return; 
     }
 
     /* ===============================
        3️⃣ CREAR USUARIO EN DOTA
     =============================== */
-
     const nuevoUsuario = await crearUsuarioEnDota({
       nombreBase,
       DOTA_DOMAIN: config.DOTA_DOMAIN,
@@ -314,15 +341,13 @@ Clave: ${usuarioExistente.clave}`;
     });
 
     if (!nuevoUsuario?.loginNuevo || !nuevoUsuario?.passDota) {
-      return res.status(500).json({
-        error: "No se pudo crear usuario en Dota"
-      });
+      console.error("❌ No se pudo crear usuario en Dota");
+      return; // Corta la ejecución
     }
 
     /* ===============================
        4️⃣ GUARDAR EN DB (MISMA LÓGICA)
     =============================== */
-
     const nuevo = await guardarUsuario({
       telefono,
       nombre_usuario: nuevoUsuario.loginNuevo,
@@ -332,13 +357,12 @@ Clave: ${usuarioExistente.clave}`;
     });
 
     if (!nuevo) {
-      console.log("Usuario ya existía, continuando flujo...");
+      console.log("Usuario ya existía en DB, continuando flujo...");
     }
 
     /* ===============================
        5️⃣ ARMAR MENSAJE BIENVENIDA
     =============================== */
-
     const mensajeBienvenida =
 `Listo ${nombreBase}, ya está listo.
 Usuario: ${nuevoUsuario.loginNuevo}
@@ -347,7 +371,6 @@ Clave: ${nuevoUsuario.passDota}`;
     /* ===============================
        6️⃣ ACTUALIZAR LEAD
     =============================== */
-
     await kommoApi.patch("/api/v4/leads", [
       {
         id: Number(lead_id),
@@ -368,7 +391,6 @@ Clave: ${nuevoUsuario.passDota}`;
     /* ===============================
        7️⃣ EJECUTAR SALESBOTS
     =============================== */
-
     await ejecutarSalesbot(
       lead_id,
       config.KOMMO_SALESBOT_RESPUESTA,
@@ -381,18 +403,19 @@ Clave: ${nuevoUsuario.passDota}`;
       kommoApi
     );
 
-    return res.json({
-      status: "success"
-    });
+    console.log(`🚀 Proceso exitoso para: ${lead_id}`);
 
   } catch (error) {
-
     console.error("❌ Error crear-usuario:", error.message);
-
-    return res.status(500).json({
-      error: "Error interno",
-      detalle: error.message
-    });
+  } finally {
+    /* ===============================
+       ⏱️ LIBERAR EL ESCUDO
+    =============================== */
+    // Le damos 5 segundos de margen para que los "ecos" de Kommo reboten, 
+    // y luego lo liberamos por si el mismo usuario necesita otra acción en el futuro.
+    setTimeout(() => {
+      leadsEnProceso.delete(lead_id);
+    }, 5000);
   }
 });
 /* ================= Actualizar leadid de kommo en db ================= */  
