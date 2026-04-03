@@ -507,7 +507,32 @@ app.post("/notificar-carga", async (req, res) => {
       });
     }
 
-    // 🚀 DISPARAR SALESBOT
+    // ⏱️ VERIFICAR ACTIVIDAD RECIENTE EN DB (Parche Zona Horaria UTC)
+    let fechaString = usuario.updated_at;
+    
+    // Si la fecha no tiene la 'Z' de UTC, se la agregamos para que Node.js no se confunda de país
+    if (fechaString && !fechaString.includes("Z")) {
+      fechaString = fechaString.replace(" ", "T") + "Z";
+    }
+
+    // Calculamos el tiempo exacto transcurrido
+    const fechaActualizacion = new Date(fechaString).getTime();
+    const ahora = Date.now();
+    const minutosTranscurridos = (ahora - fechaActualizacion) / (1000 * 60);
+
+    console.log(`⏱️ Última actualización en DB hace ${minutosTranscurridos.toFixed(1)} minutos.`);
+
+    // 🛑 FRENAR SI PASARON MÁS DE 30 MINUTOS
+    if (minutosTranscurridos > 30) {
+      console.log("⚠️ Notificación cancelada: El usuario no tiene actividad en los últimos 30 min.");
+      return res.json({
+        ok: false,
+        motivo: "fuera_de_ventana_activa",
+        minutos_inactivo: Math.round(minutosTranscurridos)
+      });
+    }
+
+    // 🚀 DISPARAR SALESBOT (La ventana está activa, pasaron 30 min o menos)
     await ejecutarSalesbot(
       usuario.lead_id,
       config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
