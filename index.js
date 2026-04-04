@@ -468,7 +468,7 @@ app.post("/webhook-lead-update/:cliente", async (req, res) => {
     return res.status(500).json({ error: "error interno" });
   }
 });
-/* ================= NOTIFICAR CARGA PERSONALIZADA COMPLETO ================= */
+/* ================= NOTIFICAR CARGA DINÁMICA (POSICIÓN VARIABLE + 1 EMOJI) ================= */
 app.post("/notificar-carga", async (req, res) => {
   const { username, monto, cliente } = req.body;
   const config = kommoClients[cliente];
@@ -482,7 +482,7 @@ app.post("/notificar-carga", async (req, res) => {
     const usuario = await buscarUsuarioPorUsername(String(username).toLowerCase().trim(), cliente);
     if (!usuario || !usuario.lead_id) return res.status(404).json({ error: "Usuario sin lead_id" });
 
-    // ⏱️ 2. Validación de ventana de 30 minutos (Parche UTC incluido)
+    // ⏱️ 2. Ventana de 30 minutos (Parche UTC)
     let fechaString = usuario.updated_at;
     if (fechaString && !fechaString.includes("Z")) {
       fechaString = fechaString.replace(" ", "T") + "Z";
@@ -491,47 +491,42 @@ app.post("/notificar-carga", async (req, res) => {
     const fechaActualizacion = new Date(fechaString).getTime();
     const minutosTranscurridos = (Date.now() - fechaActualizacion) / (1000 * 60);
 
-    // Si pasó la ventana de tiempo, abortamos para no molestar al cliente
     if (minutosTranscurridos > 30) {
-      console.log(`⚠️ Fuera de ventana para ${username} (${Math.round(minutosTranscurridos)} min)`);
       return res.json({ ok: false, motivo: "fuera_de_ventana_activa" });
     }
 
-    // 🎲 3. Pool de 10 Mensajes Sutiles (Solo ✨❤️)
-        const plantillas = [
-          "✨ Ya tenés tus {monto} listos para usar, {user} ❤️",
-          "❤️ {user}, tus {monto} ya están disponibles, mucha suerte ✨",
-          "✨ Todo listo {user}, agregué {monto} en tu cuenta ❤️",
-          "❤️ {user}, ya acredité los {monto} para vos  ✨",
-          "✨ {monto} ya están activos en tu usuario, {user} ❤️",
-          "❤️ Directo a tu cuenta, {user}: {monto} disponibles ✨",
-          "✨ {user}, tus {monto} ya están listos. Aprovechalos ❤️",
-          "❤️ {monto} acreditados {user}, buena suerte ✨",
-          "✨ Todo en orden {user}: {monto} ya disponibles. ❤️",
-          "❤️ {user}, ya podés usar tus {monto}. Ánimo! ✨",
-          "✨ {monto} sumados a tu cuenta {user}. ÉXITOS!!! ❤️",
-          "❤️ {user}, lo tuyo ya está listo: {monto}. SUERTE! ✨",
-          "✨ {monto} disponibles {user}. A jugar fuerte! ❤️",
-          "❤️ {user}, ya tenés {monto}. Dale para adelante! ✨",
-          "✨ Acreditación hecha {user}: {monto} listos! ❤️"
-        ];
+    // ✂️ 3. LIMPIEZA DEL NOMBRE (Antes de los números)
+    // "nico367ws" -> "nico"
+    const nombreLimpio = username.split(/\d/)[0];
+
+    // 🎲 4. Pool de 10 Mensajes (Posición variable + 1 Emoji ✨ o ❤️)
+    const plantillas = [
+      "✨ {user}, ya se acreditó. ¡Mucha suerte!",
+      "Acreditado correctamente, {user}. ¡Suerte! ❤️",
+      "{user}, ya está cargado. ¡Éxitos! ✨",
+      "¡Mucha suerte {user}! Ya se acreditó. ❤️",
+      "✨ Cargado, {user}. ¡Que sea con premio!",
+      "Acreditado. ¡Mucha suerte {user}! ❤️",
+      "✨ {user}, ya se cargó. ¡Muchos éxitos!",
+      "¡Éxitos {user}! Ya está cargado. ❤️",
+      "✨ Todo cargado, {user}. ¡Suerte hoy!",
+      "Acreditado con éxito. ¡Suerte {user}! ❤️"
+    ];
 
     const indiceAleatorio = Math.floor(Math.random() * plantillas.length);
-    const mensajeFinal = plantillas[indiceAleatorio]
-      .replace("{user}", username)
-      .replace("{monto}", monto);
+    const mensajeFinal = plantillas[indiceAleatorio].replace("{user}", nombreLimpio);
 
-    // 🚀 4. ENVIAR MENSAJE (Escribe el texto personalizado en Kommo)
+    // 🚀 5. ENVIAR MENSAJE PERSONALIZADO (Escribe en el campo de texto de Kommo)
     await enviarMensajeYBot(usuario.lead_id, mensajeFinal, config, kommoApi);
 
-    // 🚀 5. DISPARAR SALESBOT ESPECÍFICO (Carga Exitosa)
+    // 🚀 6. DISPARAR SALESBOT DE CARGA EXITOSA (El flujo de botones/confirmación)
     await ejecutarSalesbot(
       usuario.lead_id,
       config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
       kommoApi
     );
 
-    console.log(`📢 Notificación y Bot enviados a ${username} (Lead: ${usuario.lead_id})`);
+    console.log(`📢 Notificación dinámica enviada a ${nombreLimpio}: "${mensajeFinal}"`);
 
     return res.json({ 
       ok: true, 
