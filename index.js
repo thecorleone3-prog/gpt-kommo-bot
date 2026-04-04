@@ -468,94 +468,82 @@ app.post("/webhook-lead-update/:cliente", async (req, res) => {
     return res.status(500).json({ error: "error interno" });
   }
 });
-/* ================= notificar carga a leadid kommo ================= */  
+/* ================= NOTIFICAR CARGA PERSONALIZADA COMPLETO ================= */
 app.post("/notificar-carga", async (req, res) => {
   const { username, monto, cliente } = req.body;
-
-  if (!username || !cliente) {
-    return res.status(400).json({
-      error: "Faltan datos (username, cliente)"
-    });
-  }
-
   const config = kommoClients[cliente];
 
-  if (!config) {
-    return res.status(404).json({
-      error: "Cliente no configurado"
-    });
-  }
+  if (!config) return res.status(404).json({ error: "Cliente no encontrado" });
 
   const kommoApi = crearKommoApi(config);
 
   try {
+    // 🔍 1. Buscar usuario en DB
+    const usuario = await buscarUsuarioPorUsername(String(username).toLowerCase().trim(), cliente);
+    if (!usuario || !usuario.lead_id) return res.status(404).json({ error: "Usuario sin lead_id" });
 
-    console.log("📩 notificar-carga:", { username, cliente, monto });
-
-    // 🔍 BUSCAR USUARIO EN DB (USANDO SERVICE)
-    const usuario = await buscarUsuarioPorUsername(
-      String(username).toLowerCase().trim(),
-      cliente
-    );
-
-    console.log("🔎 Usuario DB:", usuario);
-
-    if (!usuario || !usuario.lead_id) {
-      return res.status(404).json({
-        error: "Usuario sin lead_id",
-        username
-      });
-    }
-
-    // ⏱️ VERIFICAR ACTIVIDAD RECIENTE EN DB (Parche Zona Horaria UTC)
+    // ⏱️ 2. Validación de ventana de 30 minutos (Parche UTC incluido)
     let fechaString = usuario.updated_at;
-    
-    // Si la fecha no tiene la 'Z' de UTC, se la agregamos para que Node.js no se confunda de país
     if (fechaString && !fechaString.includes("Z")) {
       fechaString = fechaString.replace(" ", "T") + "Z";
     }
-
-    // Calculamos el tiempo exacto transcurrido
+    
     const fechaActualizacion = new Date(fechaString).getTime();
-    const ahora = Date.now();
-    const minutosTranscurridos = (ahora - fechaActualizacion) / (1000 * 60);
+    const minutosTranscurridos = (Date.now() - fechaActualizacion) / (1000 * 60);
 
-    console.log(`⏱️ Última actualización en DB hace ${minutosTranscurridos.toFixed(1)} minutos.`);
-
-    // 🛑 FRENAR SI PASARON MÁS DE 30 MINUTOS
+    // Si pasó la ventana de tiempo, abortamos para no molestar al cliente
     if (minutosTranscurridos > 30) {
-      console.log("⚠️ Notificación cancelada: El usuario no tiene actividad en los últimos 30 min.");
-      return res.json({
-        ok: false,
-        motivo: "fuera_de_ventana_activa",
-        minutos_inactivo: Math.round(minutosTranscurridos)
-      });
+      console.log(`⚠️ Fuera de ventana para ${username} (${Math.round(minutosTranscurridos)} min)`);
+      return res.json({ ok: false, motivo: "fuera_de_ventana_activa" });
     }
 
-    // 🚀 DISPARAR SALESBOT (La ventana está activa, pasaron 30 min o menos)
+    // 🎲 3. Pool de 10 Mensajes Sutiles (Solo ✨❤️)
+        const plantillas = [
+          "✨ Ya tenés tus {monto} listos para usar, {user} ❤️",
+          "❤️ {user}, tus {monto} ya están disponibles, mucha suerte ✨",
+          "✨ Todo listo {user}, agregué {monto} en tu cuenta ❤️",
+          "❤️ {user}, ya acredité los {monto} para vos  ✨",
+          "✨ {monto} ya están activos en tu usuario, {user} ❤️",
+          "❤️ Directo a tu cuenta, {user}: {monto} disponibles ✨",
+          "✨ {user}, tus {monto} ya están listos. Aprovechalos ❤️",
+          "❤️ {monto} acreditados {user}, buena suerte ✨",
+          "✨ Todo en orden {user}: {monto} ya disponibles. ❤️",
+          "❤️ {user}, ya podés usar tus {monto}. Ánimo! ✨",
+          "✨ {monto} sumados a tu cuenta {user}. ÉXITOS!!! ❤️",
+          "❤️ {user}, lo tuyo ya está listo: {monto}. SUERTE! ✨",
+          "✨ {monto} disponibles {user}. A jugar fuerte! ❤️",
+          "❤️ {user}, ya tenés {monto}. Dale para adelante! ✨",
+          "✨ Acreditación hecha {user}: {monto} listos! ❤️"
+        ];
+
+    const indiceAleatorio = Math.floor(Math.random() * plantillas.length);
+    const mensajeFinal = plantillas[indiceAleatorio]
+      .replace("{user}", username)
+      .replace("{monto}", monto);
+
+    // 🚀 4. ENVIAR MENSAJE (Escribe el texto personalizado en Kommo)
+    await enviarMensajeYBot(usuario.lead_id, mensajeFinal, config, kommoApi);
+
+    // 🚀 5. DISPARAR SALESBOT ESPECÍFICO (Carga Exitosa)
     await ejecutarSalesbot(
       usuario.lead_id,
       config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
       kommoApi
     );
 
-    return res.json({
-      ok: true,
-      lead_id: usuario.lead_id,
-      username,
-      monto
+    console.log(`📢 Notificación y Bot enviados a ${username} (Lead: ${usuario.lead_id})`);
+
+    return res.json({ 
+      ok: true, 
+      lead_id: usuario.lead_id, 
+      mensaje: mensajeFinal 
     });
 
   } catch (err) {
-    console.error("❌ Error notificar-carga:", err.message);
-
-    return res.status(500).json({
-      error: "Error interno",
-      detalle: err.message
-    });
+    console.error("❌ Error en notificar-carga:", err.message);
+    return res.status(500).json({ error: "Error interno" });
   }
 });
-
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */
 app.post("/webhook-ocr/:cliente", async (req, res) => {
 
