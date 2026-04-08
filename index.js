@@ -675,21 +675,17 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
     const promoCreada = dataV1.codigo; 
 
     /* 2️⃣ ARMAR EL MENSAJE */
-    const mensajePromo = `¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma. ¡Mucha suerte! ✨`;
+    const mensajePromo = `${promoCreada}`;
 
     /* 3️⃣ ENVIAR USANDO LA FUNCIÓN MÁGICA 🚀 */
     // Esta función hace el patch y activa el bot de respuesta automáticamente
     await enviarMensajeYBot(Number(lead_id), mensajePromo, config, kommoApi);
 
-    // 4️⃣ OPCIONAL: DISPARAR SALESBOT EXTRA (Si tenés uno de confirmación)
-    // Si querés que además aparezcan botones o algo especial:
-    /*
     await ejecutarSalesbot(
       Number(lead_id),
-      config.KOMMO_SALESBOT_ID_CARGA_EXITOSA, // O el ID que prefieras
+      config.KOMMO_SALESBOT_ID_TIRADAS_GRATIS, // O el ID que prefieras
       kommoApi
     );
-    */
 
     console.log(`✅ Promo ${promoCreada} enviada con éxito usando enviarMensajeYBot`);
 
