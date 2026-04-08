@@ -640,7 +640,7 @@ if (telefono && monto) {
   }
 });
 
-/* ================= crear promo manual kommo (Corregido con Axios y Delay) ================= */  
+/* ================= crear promo manual kommo (Usando enviarMensajeYBot) ================= */  
 app.post("/crear-promo-manual/:cliente", async (req, res) => {
 
   const clienteId = req.params.cliente;
@@ -662,54 +662,44 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
   const kommoApi = crearKommoApi(config);
 
   try {
-    /* 1️⃣ PEDIMOS EL CÓDIGO A TU API V1 (Usando Axios para evitar errores de fetch) */
-    console.log(`🎁 Solicitando promo a V1 para lead: ${lead_id}...`);
-    
-    const { data: dataV1 } = await axios.post(`${URL_V1_BACKEND}/promos/crear/${clienteId}`, {}, {
-        timeout: 10000 // 10 segundos de espera por si el bot de Dota tarda
+    /* 1️⃣ PEDIMOS EL CÓDIGO A TU API V1 */
+    const responseV1 = await fetch(`${URL_V1_BACKEND}/promos/crear/${clienteId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}) 
     });
 
-    if (!dataV1.ok) throw new Error(`Error en V1 Backend: ${dataV1.error}`);
+    const dataV1 = await responseV1.json();
+    if (!dataV1.ok) throw new Error(`Error en V1: ${dataV1.error}`);
 
     const promoCreada = dataV1.codigo; 
-    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma. ¡Mucha suerte! ✨`;
 
-    /* 2️⃣ ACTUALIZAR EL CAMPO DEL LEAD (Patch Manual) */
-    // Lo hacemos manual para asegurar que el dato entre antes de llamar al bot
-    await kommoApi.patch("/api/v4/leads", [
-      {
-        id: Number(lead_id),
-        custom_fields_values: [
-          {
-            field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
-            values: [{ value: mensajePromo }]
-          }
-        ]
-      }
-    ]);
+    /* 2️⃣ ARMAR EL MENSAJE */
+    const mensajePromo = `¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma. ¡Mucha suerte! ✨`;
 
-    console.log(`⏳ Mensaje escrito en el lead ${lead_id}. Esperando sincronización...`);
+    /* 3️⃣ ENVIAR USANDO LA FUNCIÓN MÁGICA 🚀 */
+    // Esta función hace el patch y activa el bot de respuesta automáticamente
+    await enviarMensajeYBot(Number(lead_id), mensajePromo, config, kommoApi);
 
-    /* 3️⃣ PEQUEÑA ESPERA (DELAY) */
-    // Esto es vital en Kommo para que el Salesbot encuentre el campo lleno
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    // 4️⃣ OPCIONAL: DISPARAR SALESBOT EXTRA (Si tenés uno de confirmación)
+    // Si querés que además aparezcan botones o algo especial:
+    /*
+    await ejecutarSalesbot(
+      Number(lead_id),
+      config.KOMMO_SALESBOT_ID_CARGA_EXITOSA, // O el ID que prefieras
+      kommoApi
+    );
+    */
 
-    /* 4️⃣ ACTIVAR EL SALESBOT (Explícitamente) */
-    // Usamos el ID de respuesta que ya tenés configurado
-    await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
-
-    console.log(`✅ Proceso de promo finalizado con éxito para: ${lead_id}`);
+    console.log(`✅ Promo ${promoCreada} enviada con éxito usando enviarMensajeYBot`);
 
   } catch (error) {
-    // Si falla el V1 o la API, logueamos el error real
-    console.error("❌ Error en crear-promo-manual:", error.response?.data || error.message);
+    console.error("❌ Error crear-promo-manual:", error.message);
   } finally {
-    /* 🛡️ LIBERAR EL ESCUDO */
-    setTimeout(() => {
-      leadsEnProceso.delete(lead_id);
-    }, 5000);
+    setTimeout(() => { leadsEnProceso.delete(lead_id); }, 5000);
   }
 });
+
 const PORT = process.env.PORT || 3000;
 /* ================= FIN ================= */
 app.listen(PORT, () => {
