@@ -678,7 +678,7 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
     const promoCreada = dataV1.codigo; 
 
     /* 2️⃣ ARMAR MENSAJE CON EL CÓDIGO RECIBIDO */
-    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma.`;
+    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! Código: *${promoCreada}* Canjealo ahora en la plataforma.`;
 
     await kommoApi.patch("/api/v4/leads", [
       {
