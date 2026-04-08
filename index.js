@@ -640,7 +640,7 @@ if (telefono && monto) {
   }
 });
 
-/* ================= crear promo manual kommo (Escuchando a V1) ================= */  
+/* ================= crear promo manual kommo (Usando enviarMensajeYBot) ================= */  
 app.post("/crear-promo-manual/:cliente", async (req, res) => {
 
   const clienteId = req.params.cliente;
@@ -662,8 +662,7 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
   const kommoApi = crearKommoApi(config);
 
   try {
-    /* 1️⃣ LE PEDIMOS EL CÓDIGO A TU API V1 */
-    // Como tu API V1 ya genera el código sola, mandamos el POST vacío
+    /* 1️⃣ PEDIMOS EL CÓDIGO A TU API V1 */
     const responseV1 = await fetch(`${URL_V1_BACKEND}/promos/crear/${clienteId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -671,31 +670,28 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
     });
 
     const dataV1 = await responseV1.json();
-
     if (!dataV1.ok) throw new Error(`Error en V1: ${dataV1.error}`);
 
-    // 🔥 ACÁ ESTÁ LA CLAVE: Usamos el código que nos devolvió Dota
     const promoCreada = dataV1.codigo; 
 
-    /* 2️⃣ ARMAR MENSAJE CON EL CÓDIGO RECIBIDO */
-    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! Código: *${promoCreada}* Canjealo ahora en la plataforma.`;
+    /* 2️⃣ ARMAR EL MENSAJE */
+    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma. ¡Mucha suerte! ✨`;
 
-    await kommoApi.patch("/api/v4/leads", [
-      {
-        id: Number(lead_id),
-        custom_fields_values: [
-          {
-            field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
-            values: [{ value: mensajePromo }]
-          }
-        ]
-      }
-    ]);
+    /* 3️⃣ ENVIAR USANDO LA FUNCIÓN MÁGICA 🚀 */
+    // Esta función hace el patch y activa el bot de respuesta automáticamente
+    await enviarMensajeYBot(Number(lead_id), mensajePromo, config, kommoApi);
 
-    /* 3️⃣ DISPARAR SALESBOT */
-    await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
+    // 4️⃣ OPCIONAL: DISPARAR SALESBOT EXTRA (Si tenés uno de confirmación)
+    // Si querés que además aparezcan botones o algo especial:
+    /*
+    await ejecutarSalesbot(
+      Number(lead_id),
+      config.KOMMO_SALESBOT_ID_CARGA_EXITOSA, // O el ID que prefieras
+      kommoApi
+    );
+    */
 
-    console.log(`✅ Promo ${promoCreada} (generada por V1) enviada al lead ${lead_id}`);
+    console.log(`✅ Promo ${promoCreada} enviada con éxito usando enviarMensajeYBot`);
 
   } catch (error) {
     console.error("❌ Error crear-promo-manual:", error.message);
