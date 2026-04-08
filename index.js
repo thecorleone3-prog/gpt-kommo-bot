@@ -640,6 +640,70 @@ if (telefono && monto) {
   }
 });
 
+/* ================= crear promo manual kommo (Escuchando a V1) ================= */  
+app.post("/crear-promo-manual/:cliente", async (req, res) => {
+
+  const clienteId = req.params.cliente;
+  const config = kommoClients[clienteId];
+  const URL_V1_BACKEND = "https://v1-production-9eba.up.railway.app"; 
+
+  if (!config) return res.status(404).json({ error: "Cliente no encontrado" });
+
+  const lead_id = getLeadId(req.body);
+  if (!lead_id) return res.status(400).json({ error: "No llegó lead_id" });
+
+  // 🛡️ Escudo de duplicados
+  if (leadsEnProceso.has(lead_id)) return res.status(200).json({ status: "bloqueado" });
+  leadsEnProceso.add(lead_id);
+
+  // 🚀 Respuesta rápida a Kommo
+  res.status(200).json({ status: "procesando_promo" });
+
+  const kommoApi = crearKommoApi(config);
+
+  try {
+    /* 1️⃣ LE PEDIMOS EL CÓDIGO A TU API V1 */
+    // Como tu API V1 ya genera el código sola, mandamos el POST vacío
+    const responseV1 = await fetch(`${URL_V1_BACKEND}/promos/crear/${clienteId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}) 
+    });
+
+    const dataV1 = await responseV1.json();
+
+    if (!dataV1.ok) throw new Error(`Error en V1: ${dataV1.error}`);
+
+    // 🔥 ACÁ ESTÁ LA CLAVE: Usamos el código que nos devolvió Dota
+    const promoCreada = dataV1.codigo; 
+
+    /* 2️⃣ ARMAR MENSAJE CON EL CÓDIGO RECIBIDO */
+    const mensajePromo = `🎁 ¡Acá tenés tus tiradas gratis! \n\nCódigo: *${promoCreada}* \n\nCanjealo ahora en la plataforma.`;
+
+    await kommoApi.patch("/api/v4/leads", [
+      {
+        id: Number(lead_id),
+        custom_fields_values: [
+          {
+            field_id: Number(config.KOMMO_FIELD_ID_MENSAJEENVIAR),
+            values: [{ value: mensajePromo }]
+          }
+        ]
+      }
+    ]);
+
+    /* 3️⃣ DISPARAR SALESBOT */
+    await ejecutarSalesbot(lead_id, config.KOMMO_SALESBOT_RESPUESTA, kommoApi);
+
+    console.log(`✅ Promo ${promoCreada} (generada por V1) enviada al lead ${lead_id}`);
+
+  } catch (error) {
+    console.error("❌ Error crear-promo-manual:", error.message);
+  } finally {
+    setTimeout(() => { leadsEnProceso.delete(lead_id); }, 5000);
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 /* ================= FIN ================= */
 app.listen(PORT, () => {
