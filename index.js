@@ -403,7 +403,6 @@ Clave: ${nuevoUsuario.passDota}`;
       kommoApi
     );
 
-    console.log(`🚀 Proceso exitoso para: ${lead_id}`);
 
   } catch (error) {
     console.error("❌ Error crear-usuario:", error.message);
@@ -525,8 +524,6 @@ app.post("/notificar-carga", async (req, res) => {
       config.KOMMO_SALESBOT_ID_CARGA_EXITOSA,
       kommoApi
     );
-
-    console.log(`📢 Notificación dinámica enviada a ${nombreLimpio}: "${mensajeFinal}"`);
 
     return res.json({ 
       ok: true, 
@@ -686,8 +683,6 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
       config.KOMMO_SALESBOT_ID_TIRADAS_GRATIS, // O el ID que prefieras
       kommoApi
     );
-
-    console.log(`✅ Promo ${promoCreada} enviada con éxito usando enviarMensajeYBot`);
 
   } catch (error) {
     console.error("❌ Error crear-promo-manual:", error.message);
