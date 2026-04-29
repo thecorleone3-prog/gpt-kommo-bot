@@ -481,14 +481,25 @@ app.post("/notificar-carga", async (req, res) => {
     const usuario = await buscarUsuarioPorUsername(String(username).toLowerCase().trim(), cliente);
     if (!usuario || !usuario.lead_id) return res.status(404).json({ error: "Usuario sin lead_id" });
 
-    // ⏱️ 2. Ventana de 30 minutos (Parche UTC)
-    let fechaString = usuario.updated_at;
-    if (fechaString && !fechaString.includes("Z")) {
-      fechaString = fechaString.replace(" ", "T") + "Z";
+    // ⏱️ 2. Ventana de 30 minutos (Corregido para Supabase)
+    // Se recomienda usar usuario.ultima_carga_fecha si quieres medir desde la última carga real
+    const fechaDB = usuario.updated_at; 
+
+    if (!fechaDB) {
+      console.error("❌ Error: usuario no tiene updated_at en DB:", username);
+      return res.status(400).json({ error: "Falta fecha en DB" });
     }
-    
-    const fechaActualizacion = new Date(fechaString).getTime();
+
+    // Supabase ya entrega un formato ISO compatible, se pasa directo a Date
+    const fechaActualizacion = new Date(fechaDB).getTime();
+
+    if (isNaN(fechaActualizacion)) {
+      console.error("❌ Fecha inválida recibida de Supabase:", fechaDB);
+      return res.status(400).json({ error: "Formato de fecha corrupto" });
+    }
+
     const minutosTranscurridos = (Date.now() - fechaActualizacion) / (1000 * 60);
+    console.log(`⏱️ Usuario: ${username} | Minutos transcurridos: ${minutosTranscurridos.toFixed(2)}`);
 
     if (minutosTranscurridos > 30) {
       return res.json({ ok: false, motivo: "fuera_de_ventana_activa" });
@@ -536,6 +547,7 @@ app.post("/notificar-carga", async (req, res) => {
     return res.status(500).json({ error: "Error interno" });
   }
 });
+
 /* ================= WEBHOOK OCR (DESDE PYTHON) ================= */
 app.post("/webhook-ocr/:cliente", async (req, res) => {
 
