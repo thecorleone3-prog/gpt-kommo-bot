@@ -499,7 +499,6 @@ app.post("/notificar-carga", async (req, res) => {
     }
 
     const minutosTranscurridos = (Date.now() - fechaActualizacion) / (1000 * 60);
-    console.log(`⏱️ Usuario: ${username} | Minutos transcurridos: ${minutosTranscurridos.toFixed(2)}`);
 
     if (minutosTranscurridos > 30) {
       return res.json({ ok: false, motivo: "fuera_de_ventana_activa" });
