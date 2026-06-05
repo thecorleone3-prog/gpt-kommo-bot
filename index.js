@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { crearUsuarioEnDota } from "./services/dotaService.js";
 import { kommoClients } from "./config/kommoClients.js";
 import {buscarUsuarioPorTelefono,guardarUsuario,actualizarUltimaCarga,actualizarLeadId,buscarUsuarioPorUsername} from "./services/dbService.js";
-import {getLeadId,obtenerTelefono} from "./utils/utilsGenerales.js";
+import {getLeadId,obtenerTelefono,logError} from "./utils/utilsGenerales.js";
 import {colasDeEspera,bufferMensajes,archivosProcesados,registrarActividad,TIEMPO_EXPIRACION} from "./services/chatMemory.js";
 import { descargarImagen, enviarDiscord } from "./services/fileService.js";
 import { enviarMensajeYBot, ejecutarSalesbot } from "./services/kommoBotService.js";
@@ -276,8 +276,8 @@ app.post("/crear-usuario/:cliente", async (req, res) => {
     const contactoId = lead._embedded?.contacts?.[0]?.id;
 
     if (!contactoId) {
-      console.error("❌ Lead sin contacto asociado");
-      return; // Corta la ejecución
+      console.error(`❌ crear-usuario lead ${lead_id}: sin contacto asociado`);
+      return;
     }
 
     const { data: contacto } = await kommoApi.get(
@@ -287,8 +287,8 @@ app.post("/crear-usuario/:cliente", async (req, res) => {
     const telefono = obtenerTelefono(contacto);
 
     if (!telefono) {
-      console.error("❌ Contacto sin teléfono válido");
-      return; // Corta la ejecución
+      console.error(`❌ crear-usuario lead ${lead_id}: contacto sin teléfono`);
+      return;
     }
 
     /* ===============================
@@ -341,8 +341,8 @@ Clave: ${usuarioExistente.clave}`;
     });
 
     if (!nuevoUsuario?.loginNuevo || !nuevoUsuario?.passDota) {
-      console.error("❌ No se pudo crear usuario en Dota");
-      return; // Corta la ejecución
+      console.error(`❌ crear-usuario lead ${lead_id}: falló creación en Dota`);
+      return;
     }
 
     /* ===============================
@@ -403,9 +403,10 @@ Clave: ${nuevoUsuario.passDota}`;
       kommoApi
     );
 
+    console.log(`✅ crear-usuario OK lead ${lead_id}: ${nuevoUsuario.loginNuevo}`);
 
   } catch (error) {
-    console.error("❌ Error crear-usuario:", error.message);
+    logError("❌ Error crear-usuario:", error);
   } finally {
     /* ===============================
        ⏱️ LIBERAR EL ESCUDO
@@ -452,9 +453,9 @@ app.post("/webhook-lead-update/:cliente", async (req, res) => {
       return res.json({ status: "no_existe" });
     }
 
-    if (usuario.lead_id !== leadId) {
-  await actualizarLeadId(telefono, clienteId, leadId);
-}
+    if (String(usuario.lead_id) !== String(leadId)) {
+      await actualizarLeadId(telefono, clienteId, leadId);
+    }
 
     return res.json({
       status: "updated",
@@ -463,7 +464,7 @@ app.post("/webhook-lead-update/:cliente", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ webhook lead update:", err.message);
+    logError("❌ webhook lead update:", err);
     return res.status(500).json({ error: "error interno" });
   }
 });
@@ -653,7 +654,8 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
 
   const clienteId = req.params.cliente;
   const config = kommoClients[clienteId];
-  const URL_V1_BACKEND = "https://v1-production-9eba.up.railway.app"; 
+  const URL_V1_BACKEND =
+    process.env.V1_BACKEND_URL || "https://v1-production-9eba.up.railway.app";
 
   if (!config) return res.status(404).json({ error: "Cliente no encontrado" });
 
@@ -671,16 +673,20 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
 
   try {
     /* 1️⃣ PEDIMOS EL CÓDIGO A TU API V1 */
-    const responseV1 = await fetch(`${URL_V1_BACKEND}/promos/crear/${clienteId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}) 
-    });
+    console.log(`🎟️ Solicitando promo a V1: ${URL_V1_BACKEND}/promos/crear/${clienteId}`);
 
-    const dataV1 = await responseV1.json();
-    if (!dataV1.ok) throw new Error(`Error en V1: ${dataV1.error}`);
+    const { data: dataV1 } = await axios.post(
+      `${URL_V1_BACKEND}/promos/crear/${clienteId}`,
+      {},
+      {
+        timeout: 30000,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
 
-    const promoCreada = dataV1.codigo; 
+    if (!dataV1?.ok) throw new Error(`Error en V1: ${dataV1?.error || "respuesta inválida"}`);
+
+    const promoCreada = dataV1.codigo;
 
     /* 2️⃣ ARMAR EL MENSAJE */
     const mensajePromo = `${promoCreada}`;
@@ -695,8 +701,10 @@ app.post("/crear-promo-manual/:cliente", async (req, res) => {
       kommoApi
     );
 
+    console.log(`✅ Promo enviada al lead ${lead_id}: ${promoCreada}`);
+
   } catch (error) {
-    console.error("❌ Error crear-promo-manual:", error.message);
+    logError("❌ Error crear-promo-manual:", error);
   } finally {
     setTimeout(() => { leadsEnProceso.delete(lead_id); }, 5000);
   }

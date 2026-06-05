@@ -1,12 +1,27 @@
 /* ================= UTIL ================= */
 export function getLeadId(body) {
-  return (
+  const id =
     body?.leads?.status?.[0]?.id ||
     body?.leads?.add?.[0]?.id ||
     body?.leads?.update?.[0]?.id ||
     body?.lead_id ||
-    null
-  );
+    null;
+  return id != null ? String(id) : null;
+}
+
+export function logError(prefijo, err) {
+  const partes = [
+    err?.message,
+    err?.code,
+    err?.response?.status != null ? `HTTP ${err.response.status}` : null,
+    typeof err?.response?.data === "string"
+      ? err.response.data
+      : err?.response?.data
+        ? JSON.stringify(err.response.data)
+        : null
+  ].filter(Boolean);
+
+  console.error(prefijo, partes.length ? partes.join(" | ") : err);
 }
 
 export function normalizarTelefono(tel) {
